@@ -220,6 +220,9 @@ async function logMigrationWarning(
     console.log(`[ClawRouter]`);
     console.log(`[ClawRouter]   If you had funds in the old wallet, run:`);
     console.log(`[ClawRouter]     /wallet migrate-solana`);
+    console.log(`[ClawRouter]`);
+    console.log(`[ClawRouter]   The new wallet pays gas. Send ~0.005 SOL to:`);
+    console.log(`[ClawRouter]     ${newSigner.address}`);
     console.log(`[ClawRouter] ════════════════════════════════════════════════`);
     console.log(`[ClawRouter]`);
   } catch {

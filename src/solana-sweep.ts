@@ -114,31 +114,38 @@ function buildTokenTransferInstruction(
 /**
  * Sweep all USDC from old (legacy secp256k1) wallet to new (SLIP-10) wallet.
  *
+ * The NEW wallet pays gas fees (not the old one). Users can't access the old
+ * wallet from Phantom/Solflare, so they can't send SOL to it. Instead they
+ * fund the new (Phantom-compatible) wallet with a tiny bit of SOL for gas.
+ *
  * @param oldKeyBytes - 32-byte private key from legacy derivation
- * @param newAddress - Solana address of the new (correct) wallet
+ * @param newKeyBytes - 32-byte private key from SLIP-10 derivation (pays gas)
  * @param rpcUrl - Optional RPC URL override
  * @returns SweepResult on success, SweepError on failure
  */
 export async function sweepSolanaWallet(
   oldKeyBytes: Uint8Array,
-  newAddress: string,
+  newKeyBytes: Uint8Array,
   rpcUrl?: string,
 ): Promise<SweepResult | SweepError> {
   const url = rpcUrl || process["env"].CLAWROUTER_SOLANA_RPC_URL || SOLANA_DEFAULT_RPC;
   const rpc = createSolanaRpc(url);
 
-  // 1. Create signer from old key bytes
-  const oldSigner = await createKeyPairSignerFromPrivateKeyBytes(oldKeyBytes);
+  // 1. Create signers from both key sets
+  const [oldSigner, newSigner] = await Promise.all([
+    createKeyPairSignerFromPrivateKeyBytes(oldKeyBytes),
+    createKeyPairSignerFromPrivateKeyBytes(newKeyBytes),
+  ]);
   const oldAddress = oldSigner.address;
+  const newAddress = newSigner.address;
 
   const mint = solAddress(SOLANA_USDC_MINT);
-  const newOwner = solAddress(newAddress);
 
-  // 2. Check old wallet SOL balance (for gas)
-  let solBalance: bigint;
+  // 2. Check NEW wallet SOL balance (it pays gas)
+  let newSolBalance: bigint;
   try {
-    const solResp = await rpc.getBalance(solAddress(oldAddress)).send();
-    solBalance = solResp.value;
+    const solResp = await rpc.getBalance(solAddress(newAddress)).send();
+    newSolBalance = solResp.value;
   } catch (err) {
     return {
       error: `Failed to check SOL balance: ${err instanceof Error ? err.message : String(err)}`,
@@ -184,23 +191,23 @@ export async function sweepSolanaWallet(
       error: "No USDC found in old wallet. Nothing to sweep.",
       oldAddress,
       newAddress,
-      solBalance,
+      solBalance: newSolBalance,
       usdcBalance: 0n,
     };
   }
 
-  // 4. Check if enough SOL for gas (~0.005 SOL = 5_000_000 lamports)
+  // 4. Check if new wallet has enough SOL for gas (~0.005 SOL = 5_000_000 lamports)
   const MIN_SOL_FOR_GAS = 5_000_000n;
-  if (solBalance < MIN_SOL_FOR_GAS) {
-    const needed = Number(MIN_SOL_FOR_GAS - solBalance) / 1e9;
+  if (newSolBalance < MIN_SOL_FOR_GAS) {
+    const needed = Number(MIN_SOL_FOR_GAS - newSolBalance) / 1e9;
     return {
       error:
-        `Insufficient SOL for transaction fees. ` +
-        `Send ~${needed.toFixed(4)} SOL to ${oldAddress} to cover gas. ` +
-        `Current SOL balance: ${(Number(solBalance) / 1e9).toFixed(6)} SOL`,
+        `Insufficient SOL for transaction fees in your new wallet. ` +
+        `Send ~${needed.toFixed(4)} SOL to ${newAddress} (your new Phantom-compatible address) to cover gas. ` +
+        `Current SOL balance: ${(Number(newSolBalance) / 1e9).toFixed(6)} SOL`,
       oldAddress,
       newAddress,
-      solBalance,
+      solBalance: newSolBalance,
       usdcBalance,
     };
   }
@@ -213,32 +220,32 @@ export async function sweepSolanaWallet(
     };
   }
 
-  // 5. Build and send SPL token transfer
+  // 5. Build and send SPL token transfer (new wallet pays gas, old wallet signs transfer)
   try {
     // Derive ATA for new wallet
-    const newAta = await getAssociatedTokenAddress(newOwner, mint);
+    const newAta = await getAssociatedTokenAddress(solAddress(newAddress), mint);
 
     // Get recent blockhash
     const { value: latestBlockhash } = await rpc.getLatestBlockhash().send();
 
-    // Build instructions: create ATA (idempotent) + transfer USDC
+    // Build instructions: create ATA (idempotent, paid by new wallet) + transfer USDC
     const createAtaIx = buildCreateAtaIdempotentInstruction(
-      oldSigner.address,
+      newSigner.address,  // new wallet pays for ATA creation
       newAta,
-      newOwner,
+      solAddress(newAddress),
       mint,
     );
 
     const transferIx = buildTokenTransferInstruction(
       solAddress(oldTokenAccount),
       newAta,
-      oldSigner.address,
+      oldSigner.address,  // old wallet authorizes the token transfer
       usdcBalance,
     );
 
     const txMessage = pipe(
       createTransactionMessage({ version: 0 }),
-      (msg) => setTransactionMessageFeePayer(oldSigner.address, msg),
+      (msg) => setTransactionMessageFeePayer(newSigner.address, msg),  // new wallet pays gas
       (msg) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, msg),
       (msg) => appendTransactionMessageInstructions([createAtaIx, transferIx], msg),
     );
@@ -266,7 +273,7 @@ export async function sweepSolanaWallet(
       error: `Transaction failed: ${err instanceof Error ? err.message : String(err)}`,
       oldAddress,
       newAddress,
-      solBalance,
+      solBalance: newSolBalance,
       usdcBalance,
     };
   }

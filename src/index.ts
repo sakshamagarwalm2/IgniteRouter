@@ -738,9 +738,9 @@ async function createWalletCommand(): Promise<OpenClawPluginCommandDefinition> {
             // Continue — sweep function will also check balance
           }
 
-          // Attempt sweep
+          // Attempt sweep (new wallet pays gas — users can fund it via Phantom)
           const { sweepSolanaWallet } = await import("./solana-sweep.js");
-          const result = await sweepSolanaWallet(legacyKeyBytes, newSigner.address);
+          const result = await sweepSolanaWallet(legacyKeyBytes, newKeyBytes);
 
           if ("error" in result) {
             return {

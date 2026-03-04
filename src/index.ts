@@ -476,8 +476,10 @@ async function startProxyInBackground(api: OpenClawPluginApi): Promise<void> {
   api.logger.info(`Pricing: Simple ~$0.001 | Code ~$0.01 | Complex ~$0.05 | Free: $0`);
 
   // Non-blocking balance check AFTER proxy is ready (won't hang startup)
-  // Uses the proxy's chain-aware balance monitor (Solana or EVM)
-  const displayAddress = proxy.solanaAddress ?? wallet.address;
+  // Uses the proxy's chain-aware balance monitor and matching active-chain address.
+  const currentChain = await resolvePaymentChain();
+  const displayAddress =
+    currentChain === "solana" && proxy.solanaAddress ? proxy.solanaAddress : wallet.address;
   proxy.balanceMonitor
     .checkBalance()
     .then((balance) => {
@@ -679,6 +681,103 @@ async function createWalletCommand(): Promise<OpenClawPluginCommandDefinition> {
         }
       }
 
+      if (subcommand === "migrate-solana") {
+        // Sweep USDC from legacy (secp256k1) wallet to new (SLIP-10) wallet
+        try {
+          if (!existsSync(MNEMONIC_FILE)) {
+            return {
+              text: "No mnemonic file found. Solana wallet not set up — nothing to migrate.",
+              isError: true,
+            };
+          }
+
+          const mnemonic = readTextFileSync(MNEMONIC_FILE).trim();
+          if (!mnemonic) {
+            return { text: "Mnemonic file is empty.", isError: true };
+          }
+
+          const { deriveSolanaKeyBytes, deriveSolanaKeyBytesLegacy } = await import("./wallet.js");
+          const { createKeyPairSignerFromPrivateKeyBytes } = await import("@solana/kit");
+
+          const legacyKeyBytes = deriveSolanaKeyBytesLegacy(mnemonic);
+          const newKeyBytes = deriveSolanaKeyBytes(mnemonic);
+
+          const [oldSigner, newSigner] = await Promise.all([
+            createKeyPairSignerFromPrivateKeyBytes(legacyKeyBytes),
+            createKeyPairSignerFromPrivateKeyBytes(newKeyBytes),
+          ]);
+
+          if (oldSigner.address === newSigner.address) {
+            return { text: "Legacy and new Solana addresses are the same. No migration needed." };
+          }
+
+          // Check old wallet balance before attempting sweep
+          let oldUsdcText = "unknown";
+          try {
+            const { SolanaBalanceMonitor } = await import("./solana-balance.js");
+            const monitor = new SolanaBalanceMonitor(oldSigner.address);
+            const balance = await monitor.checkBalance();
+            oldUsdcText = balance.balanceUSD;
+
+            if (balance.isEmpty) {
+              return {
+                text: [
+                  "**Solana Migration Status**",
+                  "",
+                  `Old wallet (secp256k1): \`${oldSigner.address}\``,
+                  `  USDC: $0.00`,
+                  "",
+                  `New wallet (SLIP-10): \`${newSigner.address}\``,
+                  "",
+                  "No USDC in old wallet. Nothing to sweep.",
+                  "Your new SLIP-10 address is Phantom/Solflare compatible.",
+                ].join("\n"),
+              };
+            }
+          } catch {
+            // Continue — sweep function will also check balance
+          }
+
+          // Attempt sweep
+          const { sweepSolanaWallet } = await import("./solana-sweep.js");
+          const result = await sweepSolanaWallet(legacyKeyBytes, newSigner.address);
+
+          if ("error" in result) {
+            return {
+              text: [
+                "**Solana Migration Failed**",
+                "",
+                `Old wallet: \`${result.oldAddress}\` (USDC: ${oldUsdcText})`,
+                `New wallet: \`${result.newAddress || newSigner.address}\``,
+                "",
+                `Error: ${result.error}`,
+              ].join("\n"),
+              isError: true,
+            };
+          }
+
+          return {
+            text: [
+              "**Solana Migration Complete**",
+              "",
+              `Swept **${result.transferred}** USDC from old to new wallet.`,
+              "",
+              `Old wallet: \`${result.oldAddress}\``,
+              `New wallet: \`${result.newAddress}\``,
+              `TX: https://solscan.io/tx/${result.txSignature}`,
+              "",
+              "Your new SLIP-10 address is Phantom/Solflare compatible.",
+              "You can recover it from your 24-word mnemonic in any standard wallet.",
+            ].join("\n"),
+          };
+        } catch (err) {
+          return {
+            text: `Migration failed: ${err instanceof Error ? err.message : String(err)}`,
+            isError: true,
+          };
+        }
+      }
+
       if (subcommand === "base") {
         // Switch back to Base (EVM) payment chain
         try {
@@ -762,6 +861,7 @@ async function createWalletCommand(): Promise<OpenClawPluginCommandDefinition> {
           !solanaSection ? "• `/wallet solana` - Enable Solana payments" : "",
           solanaSection ? "• `/wallet base` - Switch to Base (EVM)" : "",
           solanaSection ? "• `/wallet solana` - Switch to Solana" : "",
+          solanaSection ? "• `/wallet migrate-solana` - Sweep funds from old Solana wallet" : "",
         ]
           .filter(Boolean)
           .join("\n"),
@@ -1026,9 +1126,12 @@ export {
   isValidMnemonic,
   deriveEvmKey,
   deriveSolanaKeyBytes,
+  deriveSolanaKeyBytesLegacy,
   deriveAllKeys,
 } from "./wallet.js";
 export type { DerivedKeys } from "./wallet.js";
+export { sweepSolanaWallet } from "./solana-sweep.js";
+export type { SweepResult, SweepError } from "./solana-sweep.js";
 export { setupSolana, savePaymentChain, loadPaymentChain, resolvePaymentChain } from "./auth.js";
 export {
   InsufficientFundsError,

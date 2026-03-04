@@ -14,8 +14,7 @@
  */
 
 import { startProxy, getProxyPort } from "./proxy.js";
-import { resolveOrGenerateWalletKey } from "./auth.js";
-import { BalanceMonitor } from "./balance.js";
+import { resolveOrGenerateWalletKey, resolvePaymentChain } from "./auth.js";
 import { generateReport } from "./report.js";
 import { VERSION } from "./version.js";
 import { runDoctor } from "./doctor.js";
@@ -246,20 +245,22 @@ async function main(): Promise<void> {
     },
   });
 
-  // Check balance
-  const monitor = new BalanceMonitor(wallet.address);
+  // Check balance on the active payment chain
+  const paymentChain = await resolvePaymentChain();
+  const displayAddress =
+    paymentChain === "solana" && proxy.solanaAddress ? proxy.solanaAddress : wallet.address;
   try {
-    const balance = await monitor.checkBalance();
+    const balance = await proxy.balanceMonitor.checkBalance();
     if (balance.isEmpty) {
       console.log(`[ClawRouter] Wallet balance: $0.00 (using FREE model)`);
-      console.log(`[ClawRouter] Fund wallet for premium models: ${wallet.address}`);
+      console.log(`[ClawRouter] Fund wallet for premium models: ${displayAddress}`);
     } else if (balance.isLow) {
       console.log(`[ClawRouter] Wallet balance: ${balance.balanceUSD} (low)`);
     } else {
       console.log(`[ClawRouter] Wallet balance: ${balance.balanceUSD}`);
     }
   } catch {
-    console.log(`[ClawRouter] Wallet: ${wallet.address} (balance check pending)`);
+    console.log(`[ClawRouter] Wallet: ${displayAddress} (balance check pending)`);
   }
 
   console.log(`[ClawRouter] Ready - Ctrl+C to stop`);

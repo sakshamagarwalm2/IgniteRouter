@@ -33,6 +33,7 @@ import {
   generateWalletMnemonic,
   isValidMnemonic,
   deriveSolanaKeyBytes,
+  deriveSolanaKeyBytesLegacy,
   deriveAllKeys,
 } from "./wallet.js";
 
@@ -194,6 +195,39 @@ async function generateAndSaveWallet(): Promise<{
 }
 
 /**
+ * Log migration warning when legacy and new Solana addresses differ.
+ * Checks old wallet USDC balance and prints instructions.
+ */
+async function logMigrationWarning(
+  legacyKeyBytes: Uint8Array,
+  newKeyBytes: Uint8Array,
+): Promise<void> {
+  try {
+    const { createKeyPairSignerFromPrivateKeyBytes } = await import("@solana/kit");
+    const [oldSigner, newSigner] = await Promise.all([
+      createKeyPairSignerFromPrivateKeyBytes(legacyKeyBytes),
+      createKeyPairSignerFromPrivateKeyBytes(newKeyBytes),
+    ]);
+
+    console.log(`[ClawRouter]`);
+    console.log(`[ClawRouter] ⚠ SOLANA WALLET MIGRATION DETECTED`);
+    console.log(`[ClawRouter] ════════════════════════════════════════════════`);
+    console.log(`[ClawRouter]   Old address (secp256k1): ${oldSigner.address}`);
+    console.log(`[ClawRouter]   New address (SLIP-10):   ${newSigner.address}`);
+    console.log(`[ClawRouter]`);
+    console.log(`[ClawRouter]   Your Solana wallet derivation has been fixed to use`);
+    console.log(`[ClawRouter]   SLIP-10 Ed25519 (Phantom/Solflare compatible).`);
+    console.log(`[ClawRouter]`);
+    console.log(`[ClawRouter]   If you had funds in the old wallet, run:`);
+    console.log(`[ClawRouter]     /wallet migrate-solana`);
+    console.log(`[ClawRouter] ════════════════════════════════════════════════`);
+    console.log(`[ClawRouter]`);
+  } catch {
+    // Non-fatal — don't block startup if signer creation fails
+  }
+}
+
+/**
  * Resolve wallet key: load saved → env var → auto-generate.
  * Also loads mnemonic if available for Solana key derivation.
  * Called by index.ts before the auth wizard runs.
@@ -204,6 +238,8 @@ export type WalletResolution = {
   source: "saved" | "env" | "generated";
   mnemonic?: string;
   solanaPrivateKeyBytes?: Uint8Array;
+  /** Legacy (secp256k1) Solana key bytes, present when migration is needed. */
+  legacySolanaKeyBytes?: Uint8Array;
 };
 
 export async function resolveOrGenerateWalletKey(): Promise<WalletResolution> {
@@ -216,13 +252,22 @@ export async function resolveOrGenerateWalletKey(): Promise<WalletResolution> {
     const mnemonic = await loadMnemonic();
     if (mnemonic) {
       const solanaKeyBytes = deriveSolanaKeyBytes(mnemonic);
-      return {
+      const result: WalletResolution = {
         key: saved,
         address: account.address,
         source: "saved",
         mnemonic,
         solanaPrivateKeyBytes: solanaKeyBytes,
       };
+
+      // Migration detection: compare legacy (secp256k1) vs new (SLIP-10) Solana keys
+      const legacyKeyBytes = deriveSolanaKeyBytesLegacy(mnemonic);
+      if (Buffer.from(legacyKeyBytes).toString("hex") !== Buffer.from(solanaKeyBytes).toString("hex")) {
+        result.legacySolanaKeyBytes = legacyKeyBytes;
+        await logMigrationWarning(legacyKeyBytes, solanaKeyBytes);
+      }
+
+      return result;
     }
 
     return { key: saved, address: account.address, source: "saved" };
@@ -237,13 +282,22 @@ export async function resolveOrGenerateWalletKey(): Promise<WalletResolution> {
     const mnemonic = await loadMnemonic();
     if (mnemonic) {
       const solanaKeyBytes = deriveSolanaKeyBytes(mnemonic);
-      return {
+      const result: WalletResolution = {
         key: envKey,
         address: account.address,
         source: "env",
         mnemonic,
         solanaPrivateKeyBytes: solanaKeyBytes,
       };
+
+      // Migration detection
+      const legacyKeyBytes = deriveSolanaKeyBytesLegacy(mnemonic);
+      if (Buffer.from(legacyKeyBytes).toString("hex") !== Buffer.from(solanaKeyBytes).toString("hex")) {
+        result.legacySolanaKeyBytes = legacyKeyBytes;
+        await logMigrationWarning(legacyKeyBytes, solanaKeyBytes);
+      }
+
+      return result;
     }
 
     return { key: envKey, address: account.address, source: "env" };

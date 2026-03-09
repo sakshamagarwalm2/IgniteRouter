@@ -224,10 +224,15 @@ function transformPaymentError(errorBody: string): string {
     }
 
     // Handle blockrun-sol (Solana) format: code=PAYMENT_INVALID + debug=invalidReason string
-    if (parsed.error === "Payment verification failed" && parsed.code === "PAYMENT_INVALID" && parsed.debug) {
+    if (
+      parsed.error === "Payment verification failed" &&
+      parsed.code === "PAYMENT_INVALID" &&
+      parsed.debug
+    ) {
       const debugLower = parsed.debug.toLowerCase();
       const wallet = parsed.payer || "unknown";
-      const shortWallet = wallet.length > 12 ? `${wallet.slice(0, 6)}...${wallet.slice(-4)}` : wallet;
+      const shortWallet =
+        wallet.length > 12 ? `${wallet.slice(0, 6)}...${wallet.slice(-4)}` : wallet;
 
       if (debugLower.includes("insufficient")) {
         return JSON.stringify({
@@ -240,7 +245,10 @@ function transformPaymentError(errorBody: string): string {
         });
       }
 
-      if (debugLower.includes("transaction_simulation_failed") || debugLower.includes("simulation")) {
+      if (
+        debugLower.includes("transaction_simulation_failed") ||
+        debugLower.includes("simulation")
+      ) {
         console.error(`[ClawRouter] Solana transaction simulation failed: ${parsed.debug}`);
         return JSON.stringify({
           error: {
@@ -272,7 +280,9 @@ function transformPaymentError(errorBody: string): string {
       }
 
       // Unknown Solana verification error — surface the debug reason
-      console.error(`[ClawRouter] Solana payment verification failed: ${parsed.debug} payer=${wallet}`);
+      console.error(
+        `[ClawRouter] Solana payment verification failed: ${parsed.debug} payer=${wallet}`,
+      );
       return JSON.stringify({
         error: {
           message: `Solana payment verification failed: ${parsed.debug}`,
@@ -1505,7 +1515,10 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
 
     // --- Serve locally cached images (~/.openclaw/blockrun/images/) ---
     if (req.url?.startsWith("/images/") && req.method === "GET") {
-      const filename = req.url.slice("/images/".length).split("?")[0]!.replace(/[^a-zA-Z0-9._-]/g, "");
+      const filename = req.url
+        .slice("/images/".length)
+        .split("?")[0]!
+        .replace(/[^a-zA-Z0-9._-]/g, "");
       if (!filename) {
         res.writeHead(400);
         res.end("Bad request");
@@ -1516,9 +1529,18 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
         const s = await fsStat(filePath);
         if (!s.isFile()) throw new Error("not a file");
         const ext = filename.split(".").pop()?.toLowerCase() ?? "png";
-        const mime: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif" };
+        const mime: Record<string, string> = {
+          png: "image/png",
+          jpg: "image/jpeg",
+          jpeg: "image/jpeg",
+          webp: "image/webp",
+          gif: "image/gif",
+        };
         const data = await readFile(filePath);
-        res.writeHead(200, { "Content-Type": mime[ext] ?? "application/octet-stream", "Content-Length": data.length });
+        res.writeHead(200, {
+          "Content-Type": mime[ext] ?? "application/octet-stream",
+          "Content-Length": data.length,
+        });
         res.end(data);
       } catch {
         res.writeHead(404, { "Content-Type": "application/json" });
@@ -1547,7 +1569,9 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
           return;
         }
         let result: { created?: number; data?: Array<{ url?: string; revised_prompt?: string }> };
-        try { result = JSON.parse(text); } catch {
+        try {
+          result = JSON.parse(text);
+        } catch {
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(text);
           return;

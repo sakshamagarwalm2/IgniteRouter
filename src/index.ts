@@ -480,9 +480,13 @@ async function startProxyInBackground(api: OpenClawPluginApi): Promise<void> {
     .then((balance) => {
       if (balance.isEmpty) {
         api.logger.info(`Wallet (${network}): ${displayAddress}`);
-        api.logger.info(`Balance: $0.00 — send USDC on ${network} to the address above to unlock paid models.`);
+        api.logger.info(
+          `Balance: $0.00 — send USDC on ${network} to the address above to unlock paid models.`,
+        );
       } else if (balance.isLow) {
-        api.logger.info(`Wallet (${network}): ${displayAddress} | Balance: ${balance.balanceUSD} (low — top up soon)`);
+        api.logger.info(
+          `Wallet (${network}): ${displayAddress} | Balance: ${balance.balanceUSD} (low — top up soon)`,
+        );
       } else {
         api.logger.info(`Wallet (${network}): ${displayAddress} | Balance: ${balance.balanceUSD}`);
       }

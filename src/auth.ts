@@ -207,7 +207,6 @@ async function generateAndSaveWallet(): Promise<{
   };
 }
 
-
 /**
  * Resolve wallet key: load saved → env var → auto-generate.
  * Also loads mnemonic if available for Solana key derivation.

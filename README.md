@@ -334,7 +334,7 @@ npm test
 | --------------------- | ------------------------------------------------------------------ |
 | 📅 Schedule Demo      | [calendly.com/vickyfu9/30min](https://calendly.com/vickyfu9/30min) |
 | 💬 Community Telegram | [t.me/blockrunAI](https://t.me/blockrunAI)                         |
-| 🐦 X / Twitter        | [x.com/BlockRunAI](https://x.com/BlockRunAI)                       |
+| 🐦 X / Twitter        | [x.com/ClawRou](https://x.com/ClawRou)                             |
 | 📱 Founder Telegram   | [@bc1max](https://t.me/bc1max)                                     |
 | ✉️ Email              | vicky@blockrun.ai                                                  |
 

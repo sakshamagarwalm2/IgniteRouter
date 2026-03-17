@@ -172,7 +172,7 @@ test_custom_wallet() {
     # Install and set custom key
     npm install -g @blockrun/clawrouter
 
-    CUSTOM_KEY="0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+    CUSTOM_KEY="0x$(openssl rand -hex 32)"
     export CLAWROUTER_WALLET_PRIVATE_KEY="$CUSTOM_KEY"
 
     # Verify installation with custom key works

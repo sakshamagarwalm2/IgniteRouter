@@ -9,8 +9,9 @@
  */
 
 import { startProxy } from "../dist/index.js";
+import { generatePrivateKey } from "viem/accounts";
 
-const TEST_WALLET_KEY = process.env.BLOCKRUN_WALLET_KEY || "0x" + "a".repeat(64); // Placeholder - set BLOCKRUN_WALLET_KEY for real tests
+const TEST_WALLET_KEY = process.env.BLOCKRUN_WALLET_KEY || generatePrivateKey();
 
 const TEST_PORT = 8498;
 

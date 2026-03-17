@@ -294,7 +294,7 @@ test_wallet_generation() {
 test_wallet_persistence() {
     log_test "4.2" "Wallet address persistence across restarts"
 
-    local test_key="0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    local test_key="0x$(openssl rand -hex 32)"
     local addr1 addr2
 
     get_wallet_from_health() {

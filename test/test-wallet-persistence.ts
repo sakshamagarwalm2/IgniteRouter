@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import { readFile, unlink, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { generatePrivateKey } from "viem/accounts";
 
 const execAsync = promisify(exec);
 
@@ -102,7 +103,7 @@ describe("Wallet Persistence", () => {
   });
 
   it("should use env var wallet when BLOCKRUN_WALLET_KEY is set", async () => {
-    const testKey = "0x" + "a".repeat(64);
+    const testKey = generatePrivateKey();
     process.env.BLOCKRUN_WALLET_KEY = testKey;
 
     // Remove saved wallet file

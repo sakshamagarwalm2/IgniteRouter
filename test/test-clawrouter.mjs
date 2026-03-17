@@ -20,6 +20,7 @@ import {
   isInsufficientFundsError,
   isEmptyWalletError,
 } from "../dist/index.js";
+import { generatePrivateKey } from "viem/accounts";
 
 // Test utilities
 let passed = 0;
@@ -67,8 +68,8 @@ for (const m of BLOCKRUN_MODELS) {
   modelPricing.set(m.id, { inputPrice: m.inputPrice, outputPrice: m.outputPrice });
 }
 
-// Test wallet key (random, not real)
-const TEST_WALLET_KEY = "0x" + "a".repeat(64);
+// Test wallet key (ephemeral, not real)
+const TEST_WALLET_KEY = generatePrivateKey();
 
 console.log("\n═══ Exports ═══\n");
 

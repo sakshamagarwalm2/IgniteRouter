@@ -10,6 +10,7 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { generatePrivateKey } from "viem/accounts";
 
 // Track received messages
 let lastReceivedMessages: Array<{ role: string; content: string }> = [];
@@ -93,8 +94,8 @@ async function runTests() {
   const mockApi = await startMockServer();
   console.log(`Mock API started on port ${mockApi.port}`);
 
-  // Generate a test wallet key (not real, just for testing)
-  const testWalletKey = "0x" + "1".repeat(64);
+  // Generate an ephemeral test wallet key
+  const testWalletKey = generatePrivateKey();
 
   // Start ClawRouter proxy pointing to mock API
   const proxy = await startProxy({

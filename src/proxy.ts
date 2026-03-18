@@ -3552,10 +3552,15 @@ async function proxyRequest(
           break;
         }
 
-        // Track 429 rate limits to deprioritize this model for future requests
-        if (result.errorStatus === 429) {
+        // Record error and apply category-specific handling
+        const errorCat = result.errorCategory;
+        if (errorCat) {
+          recordProviderError(tryModel, errorCat);
+        }
+
+        if (errorCat === "rate_limited") {
           markRateLimited(tryModel);
-          // Check for server-side update hint
+          // Check for server-side update hint in 429 response
           try {
             const parsed = JSON.parse(result.errorBody || "{}");
             if (parsed.update_available) {
@@ -3571,6 +3576,12 @@ async function proxyRequest(
           } catch {
             /* ignore parse errors */
           }
+        } else if (errorCat === "overloaded") {
+          markOverloaded(tryModel);
+        } else if (errorCat === "auth_failure" || errorCat === "quota_exceeded") {
+          console.log(
+            `[ClawRouter] 🔑 ${errorCat === "auth_failure" ? "Auth failure" : "Quota exceeded"} for ${tryModel} — check provider config`,
+          );
         }
 
         // Payment error (insufficient funds, simulation failure) — skip remaining

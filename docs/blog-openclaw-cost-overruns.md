@@ -6,7 +6,7 @@
 
 ## The $248/Day Problem
 
-![The Autopsy of an Overrun — token volume compounds exponentially in agentic workloads, reaching 11.3M input tokens in a single hour](assets/blockrun-248-day-cost-overrun-problem.png)
+<p align="center"><img src="assets/blockrun-248-day-cost-overrun-problem.png" alt="The Autopsy of an Overrun — token volume compounds exponentially in agentic workloads, reaching 11.3M input tokens in a single hour" width="720"></p>
 
 From [openclaw/openclaw#3181](https://github.com/openclaw/openclaw/issues/3181):
 
@@ -22,7 +22,7 @@ The root cause isn't configuration error. It's that OpenClaw's LLM layer has no 
 
 ## What OpenClaw Gets Wrong at the Inference Layer
 
-![Orchestration frameworks are blind to inference realities — cost tier, error semantics, and context size go unscreened](assets/blockrun-openclaw-inference-layer-blind-spots.png)
+<p align="center"><img src="assets/blockrun-openclaw-inference-layer-blind-spots.png" alt="Orchestration frameworks are blind to inference realities — cost tier, error semantics, and context size go unscreened" width="720"></p>
 
 OpenClaw is an excellent orchestration framework — session management, tool dispatch, agent routing, memory. But every request it makes hits a single configured model with no awareness of:
 
@@ -44,7 +44,7 @@ OpenClaw is an excellent orchestration framework — session management, tool di
 
 ## ClawRouter: Built for Agentic Workloads
 
-![ClawRouter proxy manifold sits between OpenClaw and upstream APIs like GPT-4o, Claude Opus, and Gemini — cost control is a gateway concern](assets/blockrun-clawrouter-openclaw-agentic-proxy-architecture.png)
+<p align="center"><img src="assets/blockrun-clawrouter-openclaw-agentic-proxy-architecture.png" alt="ClawRouter proxy manifold sits between OpenClaw and upstream APIs like GPT-4o, Claude Opus, and Gemini — cost control is a gateway concern" width="720"></p>
 
 ClawRouter is a local OpenAI-compatible proxy, purpose-built for how AI agents actually behave — not how simple chat clients do. It sits between OpenClaw and the upstream model APIs.
 
@@ -56,7 +56,7 @@ OpenClaw → ClawRouter → blockrun.ai → GPT-4o / Opus / Gemini / ...
 
 ### 1. Token Compression — 7 Layers, Agent-Aware
 
-![Seven-layer agent-aware token compression — ClawRouter intercepts and compresses requests through 7 filters for 15–40% overall token reduction](assets/blockrun-clawrouter-7-layer-token-compression-openclaw.png)
+<p align="center"><img src="assets/blockrun-clawrouter-7-layer-token-compression-openclaw.png" alt="Seven-layer agent-aware token compression — ClawRouter intercepts and compresses requests through 7 filters for 15–40% overall token reduction" width="720"></p>
 
 Agents are the worst offenders for context bloat. Tool call results are verbose. File reads return thousands of lines. Conversation history compounds with every turn.
 
@@ -74,13 +74,13 @@ ClawRouter compresses every request through 7 layers before it hits the wire:
 
 Layer 6 is the big one. Tool results — file reads, API responses, shell output — can be 10KB+ each. The actual useful signal is often 200–300 chars. ClawRouter extracts errors, status lines, key JSON fields, and compresses the rest. Same model intelligence, 97% fewer tokens on the bulk.
 
-![Extracting intelligence from tool bloat — raw tool output is 97% noise, ClawRouter filters to 3% signal with errors, status lines, and key values](assets/blockrun-clawrouter-observation-compression-97-percent-token-savings.png)
+<p align="center"><img src="assets/blockrun-clawrouter-observation-compression-97-percent-token-savings.png" alt="Extracting intelligence from tool bloat — raw tool output is 97% noise, ClawRouter filters to 3% signal with errors, status lines, and key values" width="720"></p>
 
 **Overall reduction: 15–40% on typical agentic workloads.** On the $248/day scenario, that's $150–$200/day in savings from compression alone, before any routing changes.
 
 ### 2. Automatic Tier Routing — Right Model for Each Request
 
-![Right-sizing models for specific agent tasks — ClawRouter's task-to-tier routing engine with session pinning routes heartbeats to Flash and reasoning to Opus](assets/blockrun-clawrouter-openclaw-automatic-tier-routing-model-selection.png)
+<p align="center"><img src="assets/blockrun-clawrouter-openclaw-automatic-tier-routing-model-selection.png" alt="Right-sizing models for specific agent tasks — ClawRouter's task-to-tier routing engine with session pinning routes heartbeats to Flash and reasoning to Opus" width="720"></p>
 
 ClawRouter classifies every request before forwarding:
 
@@ -108,7 +108,7 @@ ClawRouter inspects every HTTP 200 response body before forwarding it ([#49902](
 
 ### 5. Correct Error Classification — No Retry Storms
 
-![Stopping retry storms at the HTTP layer — ClawRouter classifies errors per provider with logic gate classifier and automated mechanical actions](assets/blockrun-clawrouter-openclaw-error-classification-retry-storm-prevention.png)
+<p align="center"><img src="assets/blockrun-clawrouter-openclaw-error-classification-retry-storm-prevention.png" alt="Stopping retry storms at the HTTP layer — ClawRouter classifies errors per provider with logic gate classifier and automated mechanical actions" width="720"></p>
 
 ClawRouter classifies errors at the HTTP/body layer before OpenClaw sees them:
 
@@ -127,7 +127,7 @@ Per-provider error state is tracked independently. If MiniMax is having a bad ho
 
 ### 6. Session Memory — Agents That Remember
 
-![Agents that remember without compounding cost — ClawRouter session journaling vs standard OpenClaw context compounding across turns](assets/blockrun-clawrouter-openclaw-session-memory-journaling-vs-context-compounding.png)
+<p align="center"><img src="assets/blockrun-clawrouter-openclaw-session-memory-journaling-vs-context-compounding.png" alt="Agents that remember without compounding cost — ClawRouter session journaling vs standard OpenClaw context compounding across turns" width="720"></p>
 
 OpenClaw sessions can be long-lived. ClawRouter maintains a session journal — extracting decisions, results, and context from each turn — and injects relevant history when the agent asks questions that reference earlier work.
 
@@ -135,7 +135,7 @@ Less context repeated = fewer tokens = lower cost. Agents that need to recall ea
 
 ### 7. x402 Micropayments — Wallet-Based Budget Control
 
-![Budget limits enforced by physical construction — wallet loaded via Base/Solana, pay per call across 41+ models, balance hits zero and the valve shuts cleanly](assets/blockrun-clawrouter-x402-usdc-micropayment-wallet-budget-control.png)
+<p align="center"><img src="assets/blockrun-clawrouter-x402-usdc-micropayment-wallet-budget-control.png" alt="Budget limits enforced by physical construction — wallet loaded via Base/Solana, pay per call across 41+ models, balance hits zero and the valve shuts cleanly" width="720"></p>
 
 ClawRouter pays for inference via [x402](https://x402.org/) USDC micropayments (Base or Solana). You load a wallet. Each inference call costs exactly what it costs. When the wallet runs low, requests stop cleanly.
 
@@ -151,7 +151,7 @@ There is no monthly invoice. There is no 3am email. There is a wallet balance, a
 
 ## OpenClaw + ClawRouter: The Full Picture
 
-![Architecting for production safety — OpenClaw standalone vs OpenClaw + ClawRouter comparison across cost, context, error handling, and budgeting](assets/blockrun-clawrouter-vs-openclaw-standalone-comparison-production-safety.png)
+<p align="center"><img src="assets/blockrun-clawrouter-vs-openclaw-standalone-comparison-production-safety.png" alt="Architecting for production safety — OpenClaw standalone vs OpenClaw + ClawRouter comparison across cost, context, error handling, and budgeting" width="720"></p>
 
 | Problem | OpenClaw alone | OpenClaw + ClawRouter |
 |---------|---------------|----------------------|
@@ -173,8 +173,9 @@ There is no monthly invoice. There is no 3am email. There is a wallet balance, a
 ## Getting Started
 
 ```bash
-npm install -g @blockrun/clawrouter
-clawrouter init
+# 1. Install with smart routing enabled
+curl -fsSL https://blockrun.ai/ClawRouter-update | bash
+openclaw gateway restart
 ```
 
 ClawRouter auto-injects itself into `~/.openclaw/openclaw.json` as a provider on startup. No manual config needed — your existing tools, sessions, and extensions are unchanged.

@@ -18,6 +18,8 @@ export type SessionEntry = {
   recentHashes: string[]; // Sliding window of last 3 request content fingerprints
   strikes: number; // Consecutive similar request count
   escalated: boolean; // Whether session was already escalated via three-strike
+  // --- Cost accumulation for maxCostPerRun ---
+  sessionCostMicros: bigint; // Total estimated cost for this session run (USDC 6-decimal)
 };
 
 export type SessionConfig = {
@@ -104,6 +106,7 @@ export class SessionStore {
         recentHashes: [],
         strikes: 0,
         escalated: false,
+        sessionCostMicros: 0n,
       });
     }
   }
@@ -209,6 +212,41 @@ export class SessionStore {
     entry.escalated = true;
 
     return { model: nextConfig.primary, tier: nextTier };
+  }
+
+  /**
+   * Add cost to a session's running total for maxCostPerRun tracking.
+   * Cost is in USDC 6-decimal units (micros).
+   * Creates a cost-tracking-only entry if none exists (e.g., explicit model requests
+   * that never go through the routing path).
+   */
+  addSessionCost(sessionId: string, additionalMicros: bigint): void {
+    let entry = this.sessions.get(sessionId);
+    if (!entry) {
+      const now = Date.now();
+      entry = {
+        model: "",
+        tier: "DIRECT",
+        createdAt: now,
+        lastUsedAt: now,
+        requestCount: 0,
+        recentHashes: [],
+        strikes: 0,
+        escalated: false,
+        sessionCostMicros: 0n,
+      };
+      this.sessions.set(sessionId, entry);
+    }
+    entry.sessionCostMicros += additionalMicros;
+  }
+
+  /**
+   * Get the total accumulated cost for a session in USD.
+   */
+  getSessionCostUsd(sessionId: string): number {
+    const entry = this.sessions.get(sessionId);
+    if (!entry) return 0;
+    return Number(entry.sessionCostMicros) / 1_000_000;
   }
 
   /**

@@ -289,6 +289,18 @@ function injectModelsConfig(logger: { info: (msg: string) => void }): void {
     needsWrite = true;
   }
   const allowlist = defaults.models as Record<string, unknown>;
+  const DEPRECATED_BLOCKRUN_MODELS = ["blockrun/xai/grok-code-fast-1"];
+  let removedDeprecatedCount = 0;
+  for (const key of DEPRECATED_BLOCKRUN_MODELS) {
+    if (allowlist[key]) {
+      delete allowlist[key];
+      removedDeprecatedCount++;
+    }
+  }
+  if (removedDeprecatedCount > 0) {
+    needsWrite = true;
+    logger.info(`Removed ${removedDeprecatedCount} deprecated model entries from allowlist`);
+  }
   // Additive-only: add TOP_MODELS entries if missing, never delete user-defined entries.
   // Preserves any blockrun/* IDs the user has manually added outside this curated list.
   let addedCount = 0;
@@ -439,9 +451,25 @@ async function startProxyInBackground(api: OpenClawPluginApi): Promise<void> {
   // Resolve routing config overrides from plugin config
   const routingConfig = api.pluginConfig?.routing as Partial<RoutingConfig> | undefined;
 
+  const maxCostPerRunUsd =
+    typeof api.pluginConfig?.maxCostPerRun === "number"
+      ? (api.pluginConfig.maxCostPerRun as number)
+      : undefined;
+
+  const maxCostPerRunMode: "graceful" | "strict" =
+    api.pluginConfig?.maxCostPerRunMode === "strict" ? "strict" : "graceful";
+
+  if (maxCostPerRunUsd !== undefined) {
+    api.logger.info(
+      `Cost cap: $${maxCostPerRunUsd.toFixed(2)} per session (mode: ${maxCostPerRunMode})`,
+    );
+  }
+
   const proxy = await startProxy({
     wallet,
     routingConfig,
+    maxCostPerRunUsd,
+    maxCostPerRunMode,
     onReady: (port) => {
       api.logger.info(`BlockRun x402 proxy listening on port ${port}`);
     },

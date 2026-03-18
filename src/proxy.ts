@@ -111,6 +111,7 @@ const MAX_MESSAGES = 200; // BlockRun API limit - truncate older messages if exc
 const CONTEXT_LIMIT_KB = 5120; // Server-side limit: 5MB in KB
 const HEARTBEAT_INTERVAL_MS = 2_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 180_000; // 3 minutes (allows for on-chain tx + LLM response)
+const PER_MODEL_TIMEOUT_MS = 60_000; // 60s per individual model attempt (fallback to next on exceed)
 const MAX_FALLBACK_ATTEMPTS = 5; // Maximum models to try in fallback chain (increased from 3 to ensure cheap models are tried)
 const HEALTH_CHECK_TIMEOUT_MS = 2_000; // Timeout for checking existing proxy
 const RATE_LIMIT_COOLDOWN_MS = 60_000; // 60 seconds cooldown for rate-limited models
@@ -1133,6 +1134,8 @@ export type ProxyOptions = {
   requestTimeoutMs?: number;
   /** Skip balance checks (for testing only). Default: false */
   skipBalanceCheck?: boolean;
+  /** Override the balance monitor with a mock (for testing only). */
+  _balanceMonitorOverride?: AnyBalanceMonitor;
   /**
    * Session persistence config. When enabled, maintains model selection
    * across requests within a session to prevent mid-task model switching.
@@ -1157,6 +1160,18 @@ export type ProxyOptions = {
    * Default: enabled with 10 minute TTL, 200 max entries.
    */
   cacheConfig?: ResponseCacheConfig;
+  /**
+   * Maximum total spend (in USD) per session run.
+   * Default: undefined (no limit). Example: 0.5 = $0.50 per session.
+   */
+  maxCostPerRunUsd?: number;
+  /**
+   * How to enforce the per-run cost cap.
+   * - 'graceful' (default): when budget runs low, downgrade to cheaper models; use free model
+   *   as last resort. Only hard-stops when no model can serve the request.
+   * - 'strict': immediately return 429 once the session spend reaches the cap.
+   */
+  maxCostPerRunMode?: "graceful" | "strict";
   onReady?: (port: number) => void;
   onError?: (error: Error) => void;
   onPayment?: (info: { model: string; amount: string; network: string }) => void;
@@ -1537,7 +1552,9 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
 
   // Create balance monitor for pre-request checks (lazy import to avoid loading @solana/kit on Base chain)
   let balanceMonitor: AnyBalanceMonitor;
-  if (paymentChain === "solana" && solanaAddress) {
+  if (options._balanceMonitorOverride) {
+    balanceMonitor = options._balanceMonitorOverride;
+  } else if (paymentChain === "solana" && solanaAddress) {
     const { SolanaBalanceMonitor } = await import("./solana-balance.js");
     balanceMonitor = new SolanaBalanceMonitor(solanaAddress);
   } else {
@@ -1730,6 +1747,8 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
     }
 
     // --- Handle /v1/images/generations: proxy with x402 payment + save data URIs locally ---
+    // NOTE: image generation endpoints bypass maxCostPerRun budget tracking entirely.
+    // Cost is charged via x402 micropayment directly — no session accumulation or cap enforcement.
     if (req.url === "/v1/images/generations" && req.method === "POST") {
       const chunks: Buffer[] = [];
       for await (const chunk of req) {
@@ -2355,6 +2374,8 @@ async function proxyRequest(
   let maxTokens = 4096;
   let routingProfile: "free" | "eco" | "auto" | "premium" | null = null;
   let balanceFallbackNotice: string | undefined;
+  let budgetDowngradeNotice: string | undefined;
+  let budgetDowngradeHeaderMode: "downgraded" | undefined;
   let accumulatedContent = ""; // For session journal event extraction
   let responseInputTokens: number | undefined;
   const isChatCompletion = req.url?.includes("/chat/completions");
@@ -2377,6 +2398,10 @@ async function proxyRequest(
         ? (parsed.messages as Array<{ role: string; content: unknown }>)
         : [];
       const lastUserMsg = [...parsedMessages].reverse().find((m) => m.role === "user");
+
+      // Early tool detection for ALL request types (explicit model + routing profile).
+      // The routing-profile branch may re-assign below (no-op since same value).
+      hasTools = Array.isArray(parsed.tools) && (parsed.tools as unknown[]).length > 0;
       const rawLastContent = lastUserMsg?.content;
       const lastContent =
         typeof rawLastContent === "string"
@@ -3192,6 +3217,14 @@ async function proxyRequest(
         }
       }
 
+      // Ensure effectiveSessionId is set for explicit model requests via content hash fallback.
+      // Routing profile requests already derive session ID from message content (see line above).
+      // Explicit model requests (openai/gpt-4o, anthropic/claude-*, etc.) without an
+      // x-session-id header would otherwise have no session ID → maxCostPerRun not tracked.
+      if (!effectiveSessionId && parsedMessages.length > 0) {
+        effectiveSessionId = deriveSessionId(parsedMessages);
+      }
+
       // Rebuild body if modified
       if (bodyModified) {
         body = Buffer.from(JSON.stringify(parsed));
@@ -3306,7 +3339,8 @@ async function proxyRequest(
   // Estimate cost and check if wallet has sufficient balance
   // Skip if skipBalanceCheck is set (for testing) or if using free model
   let estimatedCostMicros: bigint | undefined;
-  const isFreeModel = modelId === FREE_MODEL;
+  // Use `let` so the balance-fallback path can update this when modelId is switched to FREE_MODEL.
+  let isFreeModel = modelId === FREE_MODEL;
 
   if (modelId && !options.skipBalanceCheck && !isFreeModel) {
     const estimated = estimateAmount(modelId, body.length, maxTokens);
@@ -3329,6 +3363,7 @@ async function proxyRequest(
           `[ClawRouter] Wallet ${sufficiency.info.isEmpty ? "empty" : "insufficient"} (${sufficiency.info.balanceUSD}), falling back to free model: ${FREE_MODEL} (requested: ${originalModel})`,
         );
         modelId = FREE_MODEL;
+        isFreeModel = true; // keep in sync — budget logic gates on !isFreeModel
         // Update the body with new model
         const parsed = JSON.parse(body.toString()) as Record<string, unknown>;
         parsed.model = FREE_MODEL;
@@ -3356,6 +3391,128 @@ async function proxyRequest(
           balanceUSD: sufficiency.info.balanceUSD,
           walletAddress: sufficiency.info.walletAddress,
         });
+      }
+    }
+  }
+
+  // --- Cost cap check: strict mode hard-stop ---
+  // In 'strict' mode, reject if the projected session spend (accumulated + this request's
+  // estimate) would exceed the cap. Checking projected cost (not just historical) prevents
+  // a single large request from overshooting the cap before it's recorded.
+  // In 'graceful' mode (default), the cap is enforced via model downgrade below.
+  // Must happen before streaming headers are sent.
+  if (
+    options.maxCostPerRunUsd &&
+    effectiveSessionId &&
+    !isFreeModel &&
+    (options.maxCostPerRunMode ?? "graceful") === "strict"
+  ) {
+    const runCostUsd = sessionStore.getSessionCostUsd(effectiveSessionId);
+    // Include this request's estimated cost so even the first request is blocked
+    // if it would push the session over the cap.
+    const thisReqEstStr =
+      estimatedCostMicros !== undefined
+        ? estimatedCostMicros.toString()
+        : (modelId ? estimateAmount(modelId, body.length, maxTokens) : undefined);
+    const thisReqEstUsd = thisReqEstStr ? Number(thisReqEstStr) / 1_000_000 : 0;
+    const projectedCostUsd = runCostUsd + thisReqEstUsd;
+    if (projectedCostUsd > options.maxCostPerRunUsd) {
+      console.log(
+        `[ClawRouter] Cost cap exceeded for session ${effectiveSessionId.slice(0, 8)}...: projected $${projectedCostUsd.toFixed(4)} (spent $${runCostUsd.toFixed(4)} + est $${thisReqEstUsd.toFixed(4)}) > $${options.maxCostPerRunUsd} limit`,
+      );
+      res.writeHead(429, {
+        "Content-Type": "application/json",
+        "X-ClawRouter-Cost-Cap-Exceeded": "1",
+      });
+      res.end(
+        JSON.stringify({
+          error: {
+            message: `ClawRouter cost cap exceeded: projected spend $${projectedCostUsd.toFixed(4)} (spent $${runCostUsd.toFixed(4)} + est $${thisReqEstUsd.toFixed(4)}) would exceed limit $${options.maxCostPerRunUsd}`,
+            type: "cost_cap_exceeded",
+            code: "cost_cap_exceeded",
+          },
+        }),
+      );
+      deduplicator.removeInflight(dedupKey);
+      return;
+    }
+  }
+
+  // --- Budget pre-check: block when remaining budget can't cover the request ---
+  // Must happen BEFORE streaming headers (429 can't be sent after SSE headers are flushed).
+  // Three cases that require a hard block rather than graceful downgrade:
+  //   (A) tool/COMPLEX/REASONING routing profile — free model can't substitute
+  //   (B) explicit model request (no routing profile) — user chose a specific model,
+  //       silently substituting with free model would be deceptive regardless of task type
+  // Simple routing profile requests are handled later via graceful downgrade.
+  if (
+    options.maxCostPerRunUsd &&
+    effectiveSessionId &&
+    !isFreeModel &&
+    (options.maxCostPerRunMode ?? "graceful") === "graceful"
+  ) {
+    const runCostUsd = sessionStore.getSessionCostUsd(effectiveSessionId);
+    const remainingUsd = options.maxCostPerRunUsd - runCostUsd;
+
+    const isComplexOrAgentic =
+      hasTools ||
+      routingDecision?.tier === "COMPLEX" ||
+      routingDecision?.tier === "REASONING";
+
+    if (isComplexOrAgentic) {
+      // Case A: tool/complex/agentic routing profile — check global model table
+      // Intentionally exclude FREE_MODEL: free model cannot handle complex/agentic tasks.
+      const canAffordAnyNonFreeModel = BLOCKRUN_MODELS.some((m) => {
+        if (m.id === FREE_MODEL) return false;
+        const est = estimateAmount(m.id, body.length, maxTokens);
+        return est !== undefined && Number(est) / 1_000_000 <= remainingUsd;
+      });
+      if (!canAffordAnyNonFreeModel) {
+        console.log(
+          `[ClawRouter] Budget insufficient for agentic/complex session ${effectiveSessionId.slice(0, 8)}...: $${Math.max(0, remainingUsd).toFixed(4)} remaining — blocking (silent downgrade would corrupt tool/complex responses)`,
+        );
+        res.writeHead(429, {
+          "Content-Type": "application/json",
+          "X-ClawRouter-Cost-Cap-Exceeded": "1",
+          "X-ClawRouter-Budget-Mode": "blocked",
+        });
+        res.end(
+          JSON.stringify({
+            error: {
+              message: `ClawRouter budget exhausted: $${Math.max(0, remainingUsd).toFixed(4)} remaining (limit: $${options.maxCostPerRunUsd}). Increase maxCostPerRun to continue.`,
+              type: "cost_cap_exceeded",
+              code: "budget_exhausted",
+            },
+          }),
+        );
+        deduplicator.removeInflight(dedupKey);
+        return;
+      }
+    } else if (!routingDecision && modelId && modelId !== FREE_MODEL) {
+      // Case B: explicit model request (user chose a specific model, not a routing profile).
+      // Silently substituting their choice with free model is deceptive — block instead.
+      const est = estimateAmount(modelId, body.length, maxTokens);
+      const canAfford = !est || Number(est) / 1_000_000 <= remainingUsd;
+      if (!canAfford) {
+        console.log(
+          `[ClawRouter] Budget insufficient for explicit model ${modelId} in session ${effectiveSessionId.slice(0, 8)}...: $${Math.max(0, remainingUsd).toFixed(4)} remaining — blocking (user explicitly chose ${modelId})`,
+        );
+        res.writeHead(429, {
+          "Content-Type": "application/json",
+          "X-ClawRouter-Cost-Cap-Exceeded": "1",
+          "X-ClawRouter-Budget-Mode": "blocked",
+        });
+        res.end(
+          JSON.stringify({
+            error: {
+              message: `ClawRouter budget exhausted: $${Math.max(0, remainingUsd).toFixed(4)} remaining (limit: $${options.maxCostPerRunUsd}). Increase maxCostPerRun to continue using ${modelId}.`,
+              type: "cost_cap_exceeded",
+              code: "budget_exhausted",
+            },
+          }),
+        );
+        deduplicator.removeInflight(dedupKey);
+        return;
       }
     }
   }
@@ -3423,9 +3580,13 @@ async function proxyRequest(
   });
 
   // --- Request timeout ---
+  // Global controller: hard deadline for the entire request (all model attempts combined).
+  // Each model attempt gets its own per-model controller (PER_MODEL_TIMEOUT_MS).
+  // If a model times out individually, we fall back to the next model instead of failing.
+  // Only the global timeout causes an immediate error.
   const timeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const globalController = new AbortController();
+  const timeoutId = setTimeout(() => globalController.abort(), timeoutMs);
 
   try {
     // --- Build fallback chain ---
@@ -3513,6 +3674,96 @@ async function proxyRequest(
       modelsToTry.push(FREE_MODEL);
     }
 
+    // --- Budget-aware routing (graceful mode) ---
+    // Filter modelsToTry to only models that fit within the remaining session budget.
+    // Simple tasks (no tools, non-complex tier): downgrade with visible warning.
+    // Complex/agentic tasks with no affordable model: already blocked above (before streaming headers).
+    if (
+      options.maxCostPerRunUsd &&
+      effectiveSessionId &&
+      !isFreeModel &&
+      (options.maxCostPerRunMode ?? "graceful") === "graceful"
+    ) {
+      const runCostUsd = sessionStore.getSessionCostUsd(effectiveSessionId);
+      const remainingUsd = options.maxCostPerRunUsd - runCostUsd;
+
+      const beforeFilter = [...modelsToTry];
+      modelsToTry = modelsToTry.filter((m) => {
+        if (m === FREE_MODEL) return true; // free model always fits
+        const est = estimateAmount(m, body.length, maxTokens);
+        if (!est) return true; // no pricing data → keep (permissive)
+        return Number(est) / 1_000_000 <= remainingUsd;
+      });
+
+      const excluded = beforeFilter.filter((m) => !modelsToTry.includes(m));
+
+      // Second-pass block: the pre-check caught obvious cases early (before streaming headers).
+      // Here we recheck against the actual filtered modelsToTry chain. If the ONLY remaining
+      // model is FREE_MODEL, we must block rather than silently degrade for:
+      //   (A) complex/agentic routing profile tasks (tools / COMPLEX / REASONING tier)
+      //   (B) explicit model requests (user chose a specific model; free substitution is deceptive)
+      // The pre-check already handles case (B) for non-streaming; this is a safety net for
+      // streaming requests where SSE headers may have already been sent.
+      const isComplexOrAgenticFilter =
+        hasTools ||
+        routingDecision?.tier === "COMPLEX" ||
+        routingDecision?.tier === "REASONING" ||
+        routingDecision === undefined; // explicit model: no routing profile → user chose the model
+      const filteredToFreeOnly =
+        modelsToTry.length > 0 && modelsToTry.every((m) => m === FREE_MODEL);
+
+      if (isComplexOrAgenticFilter && filteredToFreeOnly) {
+        const budgetSummary = `$${Math.max(0, remainingUsd).toFixed(4)} remaining (limit: $${options.maxCostPerRunUsd})`;
+        console.log(
+          `[ClawRouter] Budget filter left only free model for complex/agentic session — blocking (${budgetSummary})`,
+        );
+        const errPayload = JSON.stringify({
+          error: {
+            message: `ClawRouter budget exhausted: remaining budget (${budgetSummary}) cannot support a complex/tool request. Increase maxCostPerRun to continue.`,
+            type: "cost_cap_exceeded",
+            code: "budget_exhausted",
+          },
+        });
+        if (heartbeatInterval) clearInterval(heartbeatInterval);
+        if (headersSentEarly) {
+          // Streaming: inject error SSE event + [DONE] and close
+          safeWrite(res, `data: ${errPayload}\n\ndata: [DONE]\n\n`);
+          res.end();
+        } else {
+          res.writeHead(429, {
+            "Content-Type": "application/json",
+            "X-ClawRouter-Cost-Cap-Exceeded": "1",
+            "X-ClawRouter-Budget-Mode": "blocked",
+          });
+          res.end(errPayload);
+        }
+        deduplicator.removeInflight(dedupKey);
+        return;
+      }
+
+      if (excluded.length > 0) {
+        const budgetSummary =
+          remainingUsd > 0
+            ? `$${remainingUsd.toFixed(4)} remaining`
+            : `budget exhausted ($${runCostUsd.toFixed(4)}/$${options.maxCostPerRunUsd})`;
+        console.log(
+          `[ClawRouter] Budget downgrade (${budgetSummary}): excluded ${excluded.join(", ")}`,
+        );
+
+        // A: Set visible warning notice — prepended to response so user sees the downgrade
+        const fromModel = excluded[0];
+        const usingFree = modelsToTry.length === 1 && modelsToTry[0] === FREE_MODEL;
+        if (usingFree) {
+          budgetDowngradeNotice = `> **⚠️ Budget cap reached** ($${runCostUsd.toFixed(4)}/$${options.maxCostPerRunUsd}) — downgraded to free model. Quality may be reduced. Increase \`maxCostPerRun\` to continue with ${fromModel}.\n\n`;
+        } else {
+          const toModel = modelsToTry[0] ?? FREE_MODEL;
+          budgetDowngradeNotice = `> **⚠️ Budget low** ($${remainingUsd > 0 ? remainingUsd.toFixed(4) : "0.0000"} remaining) — using ${toModel} instead of ${fromModel}.\n\n`;
+        }
+        // B: Header flag for orchestration layers (e.g. OpenClaw can pause/warn the user)
+        budgetDowngradeHeaderMode = "downgraded";
+      }
+    }
+
     // --- Fallback loop: try each model until success ---
     let upstream: Response | undefined;
     let lastError: { body: string; status: number } | undefined;
@@ -3522,7 +3773,18 @@ async function proxyRequest(
       const tryModel = modelsToTry[i];
       const isLastAttempt = i === modelsToTry.length - 1;
 
+      // Abort immediately if global deadline has already fired
+      if (globalController.signal.aborted) {
+        throw new Error(`Request timed out after ${timeoutMs}ms`);
+      }
+
       console.log(`[ClawRouter] Trying model ${i + 1}/${modelsToTry.length}: ${tryModel}`);
+
+      // Per-model abort controller — each model attempt gets its own 60s window.
+      // When it fires, the fallback loop moves to the next model rather than failing.
+      const modelController = new AbortController();
+      const modelTimeoutId = setTimeout(() => modelController.abort(), PER_MODEL_TIMEOUT_MS);
+      const combinedSignal = AbortSignal.any([globalController.signal, modelController.signal]);
 
       const result = await tryModelRequest(
         upstreamUrl,
@@ -3533,13 +3795,35 @@ async function proxyRequest(
         maxTokens,
         payFetch,
         balanceMonitor,
-        controller.signal,
+        combinedSignal,
       );
+      clearTimeout(modelTimeoutId);
+
+      // If the global deadline fired during this attempt, bail out entirely
+      if (globalController.signal.aborted) {
+        throw new Error(`Request timed out after ${timeoutMs}ms`);
+      }
+
+      // If the per-model timeout fired (but not global), treat as fallback-worthy error
+      if (!result.success && modelController.signal.aborted && !isLastAttempt) {
+        console.log(
+          `[ClawRouter] Model ${tryModel} timed out after ${PER_MODEL_TIMEOUT_MS}ms, trying fallback`,
+        );
+        recordProviderError(tryModel, "server_error");
+        continue;
+      }
 
       if (result.success && result.response) {
         upstream = result.response;
         actualModelUsed = tryModel;
         console.log(`[ClawRouter] Success with model: ${tryModel}`);
+        // Accumulate estimated cost to session for maxCostPerRun tracking
+        if (options.maxCostPerRunUsd && effectiveSessionId && tryModel !== FREE_MODEL) {
+          const costEst = estimateAmount(tryModel, body.length, maxTokens);
+          if (costEst) {
+            sessionStore.addSessionCost(effectiveSessionId, BigInt(costEst));
+          }
+        }
         break;
       }
 
@@ -3568,6 +3852,51 @@ async function proxyRequest(
         }
 
         if (errorCat === "rate_limited") {
+          // --- Stepped backoff retry (429) ---
+          // Token-bucket rate limits often recover within milliseconds.
+          // Retry once after 200ms before treating this as a model-level failure.
+          if (!isLastAttempt && !globalController.signal.aborted) {
+            console.log(
+              `[ClawRouter] Rate-limited on ${tryModel}, retrying in 200ms before failover`,
+            );
+            await new Promise<void>((resolve) => setTimeout(resolve, 200));
+            if (!globalController.signal.aborted) {
+              const retryController = new AbortController();
+              const retryTimeoutId = setTimeout(
+                () => retryController.abort(),
+                PER_MODEL_TIMEOUT_MS,
+              );
+              const retrySignal = AbortSignal.any([
+                globalController.signal,
+                retryController.signal,
+              ]);
+              const retryResult = await tryModelRequest(
+                upstreamUrl,
+                req.method ?? "POST",
+                headers,
+                body,
+                tryModel,
+                maxTokens,
+                payFetch,
+                balanceMonitor,
+                retrySignal,
+              );
+              clearTimeout(retryTimeoutId);
+              if (retryResult.success && retryResult.response) {
+                upstream = retryResult.response;
+                actualModelUsed = tryModel;
+                console.log(`[ClawRouter] Rate-limit retry succeeded for: ${tryModel}`);
+                if (options.maxCostPerRunUsd && effectiveSessionId && tryModel !== FREE_MODEL) {
+                  const costEst = estimateAmount(tryModel, body.length, maxTokens);
+                  if (costEst) {
+                    sessionStore.addSessionCost(effectiveSessionId, BigInt(costEst));
+                  }
+                }
+                break;
+              }
+              // Retry also failed — fall through to markRateLimited
+            }
+          }
           markRateLimited(tryModel);
           // Check for server-side update hint in 429 response
           try {
@@ -3830,6 +4159,25 @@ async function proxyRequest(
                 balanceFallbackNotice = undefined; // Only inject once
               }
 
+              // Chunk 1.6: budget downgrade notice (A: visible warning when model downgraded)
+              if (budgetDowngradeNotice) {
+                const noticeChunk = {
+                  ...baseChunk,
+                  choices: [
+                    {
+                      index,
+                      delta: { content: budgetDowngradeNotice },
+                      logprobs: null,
+                      finish_reason: null,
+                    },
+                  ],
+                };
+                const noticeData = `data: ${JSON.stringify(noticeChunk)}\n\n`;
+                safeWrite(res, noticeData);
+                responseChunks.push(Buffer.from(noticeData));
+                budgetDowngradeNotice = undefined; // Only inject once
+              }
+
               // Chunk 2: content (single chunk with full content)
               if (content) {
                 const contentChunk = {
@@ -3952,6 +4300,30 @@ async function proxyRequest(
           /* not JSON, skip notice */
         }
         balanceFallbackNotice = undefined;
+      }
+
+      // A: Prepend budget downgrade notice to response content
+      if (budgetDowngradeNotice && responseBody.length > 0) {
+        try {
+          const parsed = JSON.parse(responseBody.toString()) as {
+            choices?: Array<{ message?: { content?: string } }>;
+          };
+          if (parsed.choices?.[0]?.message?.content !== undefined) {
+            parsed.choices[0].message.content =
+              budgetDowngradeNotice + parsed.choices[0].message.content;
+            responseBody = Buffer.from(JSON.stringify(parsed));
+          }
+        } catch {
+          /* not JSON, skip notice */
+        }
+        budgetDowngradeNotice = undefined;
+      }
+
+      // B: Add budget downgrade headers for orchestration layers
+      if (budgetDowngradeHeaderMode) {
+        responseHeaders["x-clawrouter-budget-downgrade"] = "1";
+        responseHeaders["x-clawrouter-budget-mode"] = budgetDowngradeHeaderMode;
+        budgetDowngradeHeaderMode = undefined;
       }
 
       // Update content-length header since body may have changed

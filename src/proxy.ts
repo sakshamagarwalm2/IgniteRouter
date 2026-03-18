@@ -328,6 +328,44 @@ function transformPaymentError(errorBody: string): string {
 }
 
 /**
+ * Semantic error categories from upstream provider responses.
+ * Used to distinguish auth failures from rate limits from server errors
+ * so each category can be handled independently without cross-contamination.
+ */
+export type ErrorCategory =
+  | "auth_failure"   // 401, 403: Wrong key or forbidden — don't retry with same key
+  | "quota_exceeded" // 403 with plan/quota body: Plan limit hit
+  | "rate_limited"   // 429: Actual throttling — 60s cooldown
+  | "overloaded"     // 529, 503+overload body: Provider capacity — 15s cooldown
+  | "server_error"   // 5xx general: Transient — fallback immediately
+  | "payment_error"  // 402: x402 payment or funds issue
+  | "config_error";  // 400, 413: Bad request content — skip this model
+
+/**
+ * Classify an upstream error response into a semantic category.
+ * Returns null if the status+body is not a provider-side issue worth retrying.
+ */
+export function categorizeError(status: number, body: string): ErrorCategory | null {
+  if (status === 401) return "auth_failure";
+  if (status === 402) return "payment_error";
+  if (status === 403) {
+    if (/plan.*limit|quota.*exceeded|subscription|allowance/i.test(body))
+      return "quota_exceeded";
+    return "auth_failure"; // generic 403 = forbidden = likely auth issue
+  }
+  if (status === 429) return "rate_limited";
+  if (status === 529) return "overloaded";
+  if (status === 503 && /overload|capacity|too.*many.*request/i.test(body)) return "overloaded";
+  if (status >= 500) return "server_error";
+  if (status === 400 || status === 413) {
+    // Only fallback on content-size or billing patterns; bare 400 = our bug, don't cycle
+    if (PROVIDER_ERROR_PATTERNS.some((p) => p.test(body))) return "config_error";
+    return null;
+  }
+  return null;
+}
+
+/**
  * Track rate-limited models to avoid hitting them again.
  * Maps model ID to the timestamp when the rate limit was hit.
  */

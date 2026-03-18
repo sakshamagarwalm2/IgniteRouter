@@ -6,7 +6,7 @@
 
 ## The $248/Day Problem
 
-![The Autopsy of an Overrun — token volume compounds exponentially in agentic workloads, reaching 11.3M input tokens in a single hour](assets/248-day-problem.png)
+![The Autopsy of an Overrun — token volume compounds exponentially in agentic workloads, reaching 11.3M input tokens in a single hour](assets/blockrun-248-day-cost-overrun-problem.png)
 
 From [openclaw/openclaw#3181](https://github.com/openclaw/openclaw/issues/3181):
 
@@ -21,6 +21,8 @@ The root cause isn't configuration error. It's that OpenClaw's LLM layer has no 
 ---
 
 ## What OpenClaw Gets Wrong at the Inference Layer
+
+![Orchestration frameworks are blind to inference realities — cost tier, error semantics, and context size go unscreened](assets/blockrun-openclaw-inference-layer-blind-spots.png)
 
 OpenClaw is an excellent orchestration framework — session management, tool dispatch, agent routing, memory. But every request it makes hits a single configured model with no awareness of:
 

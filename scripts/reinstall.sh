@@ -1,7 +1,66 @@
 #!/bin/bash
 set -e
+set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN_DIR="$HOME/.openclaw/extensions/clawrouter"
+CONFIG_PATH="$HOME/.openclaw/openclaw.json"
+WALLET_FILE="$HOME/.openclaw/blockrun/wallet.key"
+WALLET_BACKUP=""
+PLUGIN_BACKUP=""
+CONFIG_BACKUP=""
+
+cleanup_backups() {
+  if [ -n "$PLUGIN_BACKUP" ] && [ -d "$PLUGIN_BACKUP" ]; then
+    rm -rf "$PLUGIN_BACKUP"
+  fi
+  if [ -n "$CONFIG_BACKUP" ] && [ -f "$CONFIG_BACKUP" ]; then
+    rm -f "$CONFIG_BACKUP"
+  fi
+}
+
+restore_previous_install() {
+  local exit_code=$?
+
+  if [ "$exit_code" -ne 0 ]; then
+    echo ""
+    echo "✗ Reinstall failed. Restoring previous ClawRouter install..."
+
+    if [ -d "$PLUGIN_DIR" ] && [ "$PLUGIN_DIR" != "$PLUGIN_BACKUP" ]; then
+      rm -rf "$PLUGIN_DIR"
+    fi
+
+    if [ -n "$PLUGIN_BACKUP" ] && [ -d "$PLUGIN_BACKUP" ]; then
+      mv "$PLUGIN_BACKUP" "$PLUGIN_DIR"
+      echo "  ✓ Restored previous plugin files"
+    fi
+
+    if [ -n "$CONFIG_BACKUP" ] && [ -f "$CONFIG_BACKUP" ]; then
+      cp "$CONFIG_BACKUP" "$CONFIG_PATH"
+      echo "  ✓ Restored previous OpenClaw config"
+    fi
+  fi
+
+  cleanup_backups
+}
+
+run_dependency_install() {
+  local plugin_dir="$1"
+  local log_file
+  log_file="$(mktemp -t clawrouter-reinstall-npm.XXXXXX.log)"
+
+  if (cd "$plugin_dir" && npm install --omit=dev >"$log_file" 2>&1); then
+    tail -1 "$log_file"
+    rm -f "$log_file"
+  else
+    echo "  npm install failed. Last 20 log lines:" >&2
+    tail -20 "$log_file" >&2 || true
+    echo "  Full log: $log_file" >&2
+    return 1
+  fi
+}
+
+trap restore_previous_install EXIT
 
 kill_port_processes() {
   local port="$1"
@@ -29,9 +88,6 @@ echo "🦞 ClawRouter Reinstall"
 echo ""
 
 # 0. Back up wallet key BEFORE removing anything
-WALLET_FILE="$HOME/.openclaw/blockrun/wallet.key"
-WALLET_BACKUP=""
-
 echo "→ Backing up wallet..."
 if [ -f "$WALLET_FILE" ]; then
   WALLET_KEY=$(cat "$WALLET_FILE" | tr -d '[:space:]')
@@ -49,9 +105,22 @@ else
 fi
 echo ""
 
-# 1. Remove plugin files
-echo "→ Removing plugin files..."
-rm -rf ~/.openclaw/extensions/clawrouter
+# 0.5 Back up existing install for rollback
+echo "→ Backing up existing install..."
+if [ -d "$PLUGIN_DIR" ]; then
+  PLUGIN_BACKUP="$HOME/.openclaw/extensions/clawrouter.backup.$(date +%s)"
+  mv "$PLUGIN_DIR" "$PLUGIN_BACKUP"
+  echo "  ✓ Plugin files staged at: $PLUGIN_BACKUP"
+else
+  echo "  ℹ No existing plugin files found"
+fi
+
+if [ -f "$CONFIG_PATH" ]; then
+  CONFIG_BACKUP="$CONFIG_PATH.clawrouter-reinstall.$(date +%s).bak"
+  cp "$CONFIG_PATH" "$CONFIG_BACKUP"
+  echo "  ✓ Config backed up to: $CONFIG_BACKUP"
+fi
+echo ""
 
 # 2. Clean config entries
 echo "→ Cleaning config entries..."
@@ -87,8 +156,6 @@ if (Array.isArray(c.plugins?.allow)) {
 }
 // Remove deprecated model aliases from picker
 const deprecated = [
-  'blockrun/mini', 'blockrun/nvidia', 'blockrun/gpt', 'blockrun/o3', 'blockrun/grok',
-  // Delisted models — removed from BlockRun API, redirect to replacements via alias
   'blockrun/xai/grok-code-fast-1', // delisted 2026-03-12
   'blockrun/xai/grok-3-fast',      // removed (too expensive)
 ];
@@ -193,11 +260,11 @@ openclaw plugins install @blockrun/clawrouter
 
 # 6.1. Verify installation (check dist/ files exist)
 echo "→ Verifying installation..."
-DIST_PATH="$HOME/.openclaw/extensions/clawrouter/dist/index.js"
+DIST_PATH="$PLUGIN_DIR/dist/index.js"
 if [ ! -f "$DIST_PATH" ]; then
   echo "  ⚠️  dist/ files missing, clearing npm cache and retrying..."
   npm cache clean --force 2>/dev/null || true
-  rm -rf ~/.openclaw/extensions/clawrouter
+  rm -rf "$PLUGIN_DIR"
   openclaw plugins install @blockrun/clawrouter
 
   if [ ! -f "$DIST_PATH" ]; then
@@ -210,10 +277,9 @@ echo "  ✓ dist/index.js verified"
 
 # 6.1b. Ensure all dependencies are installed (Solana, x402, etc.)
 # openclaw's plugin installer may skip native deps like @solana/kit.
-PLUGIN_DIR="$HOME/.openclaw/extensions/clawrouter"
 if [ -d "$PLUGIN_DIR" ] && [ -f "$PLUGIN_DIR/package.json" ]; then
   echo "→ Installing dependencies (Solana, x402, etc.)..."
-  (cd "$PLUGIN_DIR" && npm install --omit=dev 2>&1 | tail -1)
+  run_dependency_install "$PLUGIN_DIR"
 fi
 
 # 6.2. Populate model allowlist so top BlockRun models appear in /model picker
@@ -245,7 +311,7 @@ try {
     changed = true;
   }
 
-  // Top 16 models for the /model picker
+  // Curated models for the /model picker
   const TOP_MODELS = [
     'auto', 'free', 'eco', 'premium',
     'anthropic/claude-sonnet-4.6', 'anthropic/claude-opus-4.6', 'anthropic/claude-haiku-4.5',
@@ -264,12 +330,16 @@ try {
   }
 
   const allowlist = config.agents.defaults.models;
-  // Clean out old blockrun entries not in TOP_MODELS
-  const topSet = new Set(TOP_MODELS.map(id => 'blockrun/' + id));
-  for (const key of Object.keys(allowlist)) {
-    if (key.startsWith('blockrun/') && !topSet.has(key)) {
+  const DEPRECATED_MODELS = [
+    'blockrun/xai/grok-code-fast-1',
+    'blockrun/xai/grok-3-fast'
+  ];
+  let removed = 0;
+  for (const key of DEPRECATED_MODELS) {
+    if (allowlist[key]) {
       delete allowlist[key];
       changed = true;
+      removed++;
     }
   }
   let added = 0;
@@ -283,7 +353,11 @@ try {
   if (added > 0) {
     changed = true;
     console.log('  Added ' + added + ' models to allowlist (' + TOP_MODELS.length + ' total)');
-  } else {
+  }
+  if (removed > 0) {
+    console.log('  Removed ' + removed + ' deprecated models from allowlist');
+  }
+  if (added === 0 && removed === 0) {
     console.log('  Allowlist already up to date');
   }
   if (changed) {

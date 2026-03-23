@@ -102,6 +102,26 @@ export class SolanaBalanceMonitor {
     return this.walletAddress;
   }
 
+  /**
+   * Check native SOL balance (in lamports). Useful for detecting users who
+   * funded with SOL instead of USDC.
+   */
+  async checkSolBalance(): Promise<bigint> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), BALANCE_TIMEOUT_MS);
+    try {
+      const owner = solAddress(this.walletAddress);
+      const response = await this.rpc
+        .getBalance(owner)
+        .send({ abortSignal: controller.signal });
+      return BigInt(response.value);
+    } catch {
+      return 0n;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   private async fetchBalance(): Promise<bigint> {
     const owner = solAddress(this.walletAddress);
     const mint = solAddress(SOLANA_USDC_MINT);

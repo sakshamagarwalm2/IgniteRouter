@@ -497,6 +497,11 @@ declare class SolanaBalanceMonitor {
      */
     formatUSDC(amountMicros: bigint): string;
     getWalletAddress(): string;
+    /**
+     * Check native SOL balance (in lamports). Useful for detecting users who
+     * funded with SOL instead of USDC.
+     */
+    checkSolBalance(): Promise<bigint>;
     private fetchBalance;
     private fetchBalanceOnce;
     private buildInfo;
@@ -870,6 +875,10 @@ type BlockRunModel = {
      * Default: false (must opt-in to prevent silent regressions on new models).
      */
     toolCalling?: boolean;
+    /** Model is deprecated — will be routed to fallbackModel if set */
+    deprecated?: boolean;
+    /** Model ID to route to when this model is deprecated */
+    fallbackModel?: string;
 };
 declare const BLOCKRUN_MODELS: BlockRunModel[];
 /**

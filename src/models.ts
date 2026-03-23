@@ -46,6 +46,9 @@ export const MODEL_ALIASES: Record<string, string> = {
   gpt5: "openai/gpt-5.4",
   "gpt-5.4": "openai/gpt-5.4",
   "gpt-5.4-pro": "openai/gpt-5.4-pro",
+  "gpt-5.4-nano": "openai/gpt-5.4-nano",
+  nano: "openai/gpt-5.4-nano",
+  "gpt-5-nano": "openai/gpt-5.4-nano",
   codex: "openai/gpt-5.3-codex",
   mini: "openai/gpt-4o-mini",
   o1: "openai/o1",
@@ -66,6 +69,7 @@ export const MODEL_ALIASES: Record<string, string> = {
   flash: "google/gemini-2.5-flash",
   "gemini-3.1-pro-preview": "google/gemini-3.1-pro",
   "google/gemini-3.1-pro-preview": "google/gemini-3.1-pro",
+  "gemini-3.1-flash-lite": "google/gemini-3.1-flash-lite",
 
   // xAI
   grok: "xai/grok-3",
@@ -159,6 +163,10 @@ type BlockRunModel = {
    * Default: false (must opt-in to prevent silent regressions on new models).
    */
   toolCalling?: boolean;
+  /** Model is deprecated — will be routed to fallbackModel if set */
+  deprecated?: boolean;
+  /** Model ID to route to when this model is deprecated */
+  fallbackModel?: string;
 };
 
 export const BLOCKRUN_MODELS: BlockRunModel[] = [
@@ -230,6 +238,8 @@ export const BLOCKRUN_MODELS: BlockRunModel[] = [
     contextWindow: 128000,
     maxOutput: 32768,
     toolCalling: true,
+    deprecated: true,
+    fallbackModel: "openai/gpt-5.4-nano",
   },
   {
     id: "openai/gpt-5.2-pro",
@@ -265,6 +275,16 @@ export const BLOCKRUN_MODELS: BlockRunModel[] = [
     contextWindow: 400000,
     maxOutput: 128000,
     reasoning: true,
+    toolCalling: true,
+  },
+  {
+    id: "openai/gpt-5.4-nano",
+    name: "GPT-5.4 Nano",
+    version: "5.4",
+    inputPrice: 0.2,
+    outputPrice: 1.25,
+    contextWindow: 1050000,
+    maxOutput: 32768,
     toolCalling: true,
   },
 
@@ -515,6 +535,16 @@ export const BLOCKRUN_MODELS: BlockRunModel[] = [
     outputPrice: 0.4,
     contextWindow: 1000000,
     maxOutput: 65536,
+    toolCalling: true,
+  },
+  {
+    id: "google/gemini-3.1-flash-lite",
+    name: "Gemini 3.1 Flash Lite",
+    version: "3.1",
+    inputPrice: 0.25,
+    outputPrice: 1.5,
+    contextWindow: 1000000,
+    maxOutput: 8192,
     toolCalling: true,
   },
 

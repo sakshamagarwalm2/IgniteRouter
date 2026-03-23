@@ -31728,6 +31728,23 @@ var init_solana_balance = __esm({
       getWalletAddress() {
         return this.walletAddress;
       }
+      /**
+       * Check native SOL balance (in lamports). Useful for detecting users who
+       * funded with SOL instead of USDC.
+       */
+      async checkSolBalance() {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), BALANCE_TIMEOUT_MS);
+        try {
+          const owner = address(this.walletAddress);
+          const response = await this.rpc.getBalance(owner).send({ abortSignal: controller.signal });
+          return BigInt(response.value);
+        } catch {
+          return 0n;
+        } finally {
+          clearTimeout(timer);
+        }
+      }
       async fetchBalance() {
         const owner = address(this.walletAddress);
         const mint = address(SOLANA_USDC_MINT);
@@ -32856,6 +32873,9 @@ var MODEL_ALIASES = {
   gpt5: "openai/gpt-5.4",
   "gpt-5.4": "openai/gpt-5.4",
   "gpt-5.4-pro": "openai/gpt-5.4-pro",
+  "gpt-5.4-nano": "openai/gpt-5.4-nano",
+  nano: "openai/gpt-5.4-nano",
+  "gpt-5-nano": "openai/gpt-5.4-nano",
   codex: "openai/gpt-5.3-codex",
   mini: "openai/gpt-4o-mini",
   o1: "openai/o1",
@@ -32873,6 +32893,7 @@ var MODEL_ALIASES = {
   flash: "google/gemini-2.5-flash",
   "gemini-3.1-pro-preview": "google/gemini-3.1-pro",
   "google/gemini-3.1-pro-preview": "google/gemini-3.1-pro",
+  "gemini-3.1-flash-lite": "google/gemini-3.1-flash-lite",
   // xAI
   grok: "xai/grok-3",
   "grok-fast": "xai/grok-4-fast-reasoning",
@@ -32988,7 +33009,9 @@ var BLOCKRUN_MODELS = [
     outputPrice: 0.4,
     contextWindow: 128e3,
     maxOutput: 32768,
-    toolCalling: true
+    toolCalling: true,
+    deprecated: true,
+    fallbackModel: "openai/gpt-5.4-nano"
   },
   {
     id: "openai/gpt-5.2-pro",
@@ -33024,6 +33047,16 @@ var BLOCKRUN_MODELS = [
     contextWindow: 4e5,
     maxOutput: 128e3,
     reasoning: true,
+    toolCalling: true
+  },
+  {
+    id: "openai/gpt-5.4-nano",
+    name: "GPT-5.4 Nano",
+    version: "5.4",
+    inputPrice: 0.2,
+    outputPrice: 1.25,
+    contextWindow: 105e4,
+    maxOutput: 32768,
     toolCalling: true
   },
   // OpenAI GPT-5.3 Family
@@ -33268,6 +33301,16 @@ var BLOCKRUN_MODELS = [
     outputPrice: 0.4,
     contextWindow: 1e6,
     maxOutput: 65536,
+    toolCalling: true
+  },
+  {
+    id: "google/gemini-3.1-flash-lite",
+    name: "Gemini 3.1 Flash Lite",
+    version: "3.1",
+    inputPrice: 0.25,
+    outputPrice: 1.5,
+    contextWindow: 1e6,
+    maxOutput: 8192,
     toolCalling: true
   },
   // DeepSeek
@@ -44678,8 +44721,12 @@ var DEFAULT_ROUTING_CONFIG = {
         // 1,431ms, IQ 32, 41% retention
         "moonshot/kimi-k2.5",
         // 1,646ms, IQ 47, strong quality
+        "google/gemini-3.1-flash-lite",
+        // $0.25/$1.50, 1M context — newest flash-lite
         "google/gemini-2.5-flash-lite",
-        // 1,353ms, 1M context, ultra cheap ($0.10/$0.40)
+        // 1,353ms, $0.10/$0.40
+        "openai/gpt-5.4-nano",
+        // $0.20/$1.25, 1M context
         "xai/grok-4-fast-non-reasoning",
         // 1,143ms, $0.20/$0.50 — fast fallback
         "nvidia/gpt-oss-120b"
@@ -44696,8 +44743,10 @@ var DEFAULT_ROUTING_CONFIG = {
         // 1,431ms, IQ 32, 41% retention
         "google/gemini-2.5-flash",
         // 1,238ms, 60% retention
+        "google/gemini-3.1-flash-lite",
+        // $0.25/$1.50, 1M context
         "google/gemini-2.5-flash-lite",
-        // 1,353ms, 1M context ($0.10/$0.40)
+        // 1,353ms, $0.10/$0.40
         "xai/grok-4-1-fast-non-reasoning",
         // 1,244ms, fast fallback
         "xai/grok-3-mini"
@@ -44747,28 +44796,33 @@ var DEFAULT_ROUTING_CONFIG = {
       primary: "nvidia/gpt-oss-120b",
       // 1,252ms, FREE! $0.00/$0.00
       fallback: [
+        "google/gemini-3.1-flash-lite",
+        // $0.25/$1.50 — newest flash-lite
+        "openai/gpt-5.4-nano",
+        // $0.20/$1.25 — fast nano
         "google/gemini-2.5-flash-lite",
         // 1,353ms, $0.10/$0.40
-        "xai/grok-4-fast-non-reasoning",
+        "xai/grok-4-fast-non-reasoning"
         // 1,143ms, $0.20/$0.50
-        "google/gemini-2.5-flash"
-        // 1,238ms
       ]
     },
     MEDIUM: {
-      primary: "google/gemini-2.5-flash-lite",
-      // 1,353ms, $0.10/$0.40 - cheapest capable with 1M context
+      primary: "google/gemini-3.1-flash-lite",
+      // $0.25/$1.50 — 1M context, newest flash-lite
       fallback: [
+        "openai/gpt-5.4-nano",
+        // $0.20/$1.25, 1M context
+        "google/gemini-2.5-flash-lite",
+        // 1,353ms, $0.10/$0.40
         "xai/grok-4-fast-non-reasoning",
         "google/gemini-2.5-flash",
-        "deepseek/deepseek-chat",
         "nvidia/gpt-oss-120b"
       ]
     },
     COMPLEX: {
-      primary: "google/gemini-2.5-flash-lite",
-      // 1,353ms, $0.10/$0.40 - 1M context handles complexity
-      fallback: ["xai/grok-4-0709", "google/gemini-2.5-flash", "deepseek/deepseek-chat"]
+      primary: "google/gemini-3.1-flash-lite",
+      // $0.25/$1.50 — 1M context handles complexity
+      fallback: ["google/gemini-2.5-flash-lite", "xai/grok-4-0709", "google/gemini-2.5-flash", "deepseek/deepseek-chat"]
     },
     REASONING: {
       primary: "xai/grok-4-1-fast-reasoning",
@@ -50964,7 +51018,7 @@ async function startProxyInBackground(api) {
   const currentChain = await resolvePaymentChain();
   const displayAddress = currentChain === "solana" && proxy.solanaAddress ? proxy.solanaAddress : wallet.address;
   const network = currentChain === "solana" ? "Solana" : "Base";
-  proxy.balanceMonitor.checkBalance().then((balance) => {
+  proxy.balanceMonitor.checkBalance().then(async (balance) => {
     if (balance.isEmpty) {
       api.logger.info(`Wallet (${network}): ${displayAddress}`);
       api.logger.info(
@@ -50976,6 +51030,20 @@ async function startProxyInBackground(api) {
       );
     } else {
       api.logger.info(`Wallet (${network}): ${displayAddress} | Balance: ${balance.balanceUSD}`);
+    }
+    if (currentChain === "solana" && (balance.isEmpty || balance.isLow)) {
+      try {
+        const { SolanaBalanceMonitor: SolanaBalanceMonitor2 } = await Promise.resolve().then(() => (init_solana_balance(), solana_balance_exports));
+        const monitor = proxy.balanceMonitor;
+        const solLamports = await monitor.checkSolBalance();
+        if (solLamports > 10000000n) {
+          const sol = Number(solLamports) / 1e9;
+          api.logger.info(
+            `You have ${sol.toFixed(2)} SOL \u2014 swap to USDC: https://jup.ag/swap/SOL-USDC`
+          );
+        }
+      } catch {
+      }
     }
   }).catch(() => {
     api.logger.info(`Wallet (${network}): ${displayAddress} | Balance: (checking...)`);

@@ -520,7 +520,7 @@ async function startProxyInBackground(api: OpenClawPluginApi): Promise<void> {
   const network = currentChain === "solana" ? "Solana" : "Base";
   proxy.balanceMonitor
     .checkBalance()
-    .then((balance) => {
+    .then(async (balance) => {
       if (balance.isEmpty) {
         api.logger.info(`Wallet (${network}): ${displayAddress}`);
         api.logger.info(
@@ -532,6 +532,23 @@ async function startProxyInBackground(api: OpenClawPluginApi): Promise<void> {
         );
       } else {
         api.logger.info(`Wallet (${network}): ${displayAddress} | Balance: ${balance.balanceUSD}`);
+      }
+      // On Solana, if USDC is low/empty, check for SOL and suggest swap
+      if (currentChain === "solana" && (balance.isEmpty || balance.isLow)) {
+        try {
+          const { SolanaBalanceMonitor } = await import("./solana-balance.js");
+          const monitor = proxy.balanceMonitor as InstanceType<typeof SolanaBalanceMonitor>;
+          const solLamports = await monitor.checkSolBalance();
+          // Only suggest if they have meaningful SOL (> 0.01 SOL = 10M lamports)
+          if (solLamports > 10_000_000n) {
+            const sol = Number(solLamports) / 1_000_000_000;
+            api.logger.info(
+              `You have ${sol.toFixed(2)} SOL — swap to USDC: https://jup.ag/swap/SOL-USDC`,
+            );
+          }
+        } catch {
+          // SOL check is best-effort, don't block startup
+        }
       }
     })
     .catch(() => {

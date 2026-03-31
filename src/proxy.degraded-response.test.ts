@@ -80,7 +80,9 @@ Yes.`,
           message: {
             role: "assistant",
             content: null,
-            tool_calls: [{ id: "call_1", type: "function", function: { name: "read_file", arguments: "{}" } }],
+            tool_calls: [
+              { id: "call_1", type: "function", function: { name: "read_file", arguments: "{}" } },
+            ],
           },
           finish_reason: "tool_calls",
         },

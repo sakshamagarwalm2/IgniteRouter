@@ -256,6 +256,52 @@ if (fs.existsSync(configPath)) {
 }
 "
 
+# 5b. Ensure provider baseUrl is set (must happen BEFORE openclaw plugins install,
+#     which validates the config and fails if baseUrl is missing)
+echo "→ Verifying provider config..."
+node -e "
+const os = require('os');
+const fs = require('fs');
+const path = require('path');
+const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
+
+if (!fs.existsSync(configPath)) {
+  console.log('  No config file found, skipping');
+  process.exit(0);
+}
+
+try {
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  const provider = config?.models?.providers?.blockrun;
+  if (!provider) {
+    console.log('  No blockrun provider found, skipping');
+    process.exit(0);
+  }
+
+  let changed = false;
+  if (!provider.baseUrl) {
+    provider.baseUrl = 'http://127.0.0.1:8402/v1';
+    changed = true;
+    console.log('  Fixed missing baseUrl');
+  }
+  if (!provider.apiKey) {
+    provider.apiKey = 'x402-proxy-handles-auth';
+    changed = true;
+    console.log('  Fixed missing apiKey');
+  }
+
+  if (changed) {
+    const tmpPath = configPath + '.tmp.' + process.pid;
+    fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2));
+    fs.renameSync(tmpPath, configPath);
+  } else {
+    console.log('  Provider config OK');
+  }
+} catch (err) {
+  console.log('  Skipped: ' + err.message);
+}
+"
+
 # 6. Install plugin (config is ready, but no allow list yet to avoid validation error)
 # Back up OpenClaw credentials (channels, WhatsApp/Telegram state) before plugin install
 CREDS_DIR="$HOME/.openclaw/credentials"
@@ -434,51 +480,6 @@ if (fs.existsSync(configPath)) {
   }
 } else {
   console.log('  No openclaw.json found, skipping');
-}
-"
-
-# 8. Ensure provider baseUrl is set (prevents "baseUrl: undefined" on gateway restart)
-echo "→ Verifying provider config..."
-node -e "
-const os = require('os');
-const fs = require('fs');
-const path = require('path');
-const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
-
-if (!fs.existsSync(configPath)) {
-  console.log('  No config file found, skipping');
-  process.exit(0);
-}
-
-try {
-  const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  const provider = config?.models?.providers?.blockrun;
-  if (!provider) {
-    console.log('  No blockrun provider found, skipping');
-    process.exit(0);
-  }
-
-  let changed = false;
-  if (!provider.baseUrl) {
-    provider.baseUrl = 'http://127.0.0.1:8402/v1';
-    changed = true;
-    console.log('  Fixed missing baseUrl');
-  }
-  if (!provider.apiKey) {
-    provider.apiKey = 'x402-proxy-handles-auth';
-    changed = true;
-    console.log('  Fixed missing apiKey');
-  }
-
-  if (changed) {
-    const tmpPath = configPath + '.tmp.' + process.pid;
-    fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2));
-    fs.renameSync(tmpPath, configPath);
-  } else {
-    console.log('  Provider config OK');
-  }
-} catch (err) {
-  console.log('  Skipped: ' + err.message);
 }
 "
 

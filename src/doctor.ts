@@ -36,7 +36,7 @@ interface WalletInfo {
   balance: string | null;
   isLow: boolean;
   isEmpty: boolean;
-  source: "saved" | "env" | "generated" | null;
+  source: "saved" | "env" | "config" | "generated" | null;
   paymentChain: "base" | "solana";
 }
 

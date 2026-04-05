@@ -24952,6 +24952,14 @@ var BLOCKRUN_MODELS = [
   // Smart routing meta-models — proxy replaces with actual model
   // NOTE: Model IDs are WITHOUT provider prefix (OpenClaw adds "blockrun/" automatically)
   {
+    id: "igniterouter/auto",
+    name: "IgniteRouter Auto (Smart Router)",
+    inputPrice: 0,
+    outputPrice: 0,
+    contextWindow: 105e4,
+    maxOutput: 128e3
+  },
+  {
     id: "auto",
     name: "Auto (Smart Router - Balanced)",
     inputPrice: 0,

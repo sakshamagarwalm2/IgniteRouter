@@ -16,7 +16,7 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { finished } from "node:stream";
+import { finished, Readable } from "node:stream";
 import type { AddressInfo } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -39,7 +39,7 @@ import {
 } from "./router/index.js";
 import { route as igniteRoute, type RoutingContext } from "./routing-engine.js";
 import { callWithFallback, type FallbackResult } from "./fallback-caller.js";
-import { loadProviders, type IgniteConfig } from "./user-providers.js";
+import { loadProviders, type IgniteConfig, type UserProvider } from "./user-providers.js";
 import { classifyByRules } from "./router/rules.js";
 import {
   BLOCKRUN_MODELS,
@@ -69,6 +69,7 @@ import { loadExcludeList } from "./exclude-models.js";
 import { PROXY_PORT } from "./config.js";
 import { SessionJournal } from "./journal.js";
 import { applyUpstreamProxy } from "./upstream-proxy.js";
+import { buildUpstreamRequest, stripProviderPrefix } from "./provider-url-builder.js";
 
 const BLOCKRUN_API = "https://blockrun.ai/api";
 const BLOCKRUN_SOLANA_API = "https://sol.blockrun.ai/api";
@@ -83,6 +84,7 @@ const ROUTING_PROFILES = new Set([
   "auto",
   "blockrun/premium",
   "premium",
+  "igniterouter/auto",
 ]);
 const FREE_MODEL = "free/gpt-oss-120b"; // Last-resort single free model fallback
 const FREE_MODELS = new Set([
@@ -1112,6 +1114,7 @@ export type ProxyOptions = {
 export type ProxyHandle = {
   port: number;
   baseUrl: string;
+  server?: import("node:http").Server;
   close: () => Promise<void>;
 };
 
@@ -1456,8 +1459,13 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
     });
 
     if (req.url === "/health" || req.url?.startsWith("/health?")) {
+      const igniteCfg = options.igniteConfig ?? { defaultPriority: "cost", providers: [] };
       const response: Record<string, unknown> = {
         status: "ok",
+        plugin: "igniterouter",
+        version: VERSION,
+        providers: igniteCfg.providers.length,
+        defaultPriority: igniteCfg.defaultPriority,
       };
       if (upstreamProxy) {
         response.upstreamProxy = upstreamProxy;
@@ -1526,9 +1534,29 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
     }
 
     if (req.url === "/v1/models" && req.method === "GET") {
-      const models = buildProxyModelList();
+      const igniteCfg = options.igniteConfig ?? { defaultPriority: "cost", providers: [] };
+      const staticModels = buildProxyModelList();
+      
+      // Add configured providers to models list
+      const providerModels = igniteCfg.providers.map(p => ({
+        id: p.id,
+        object: "model" as const,
+        created: Math.floor(Date.now() / 1000),
+        owned_by: p.id.split("/")[0] ?? "user"
+      }));
+
+      // Deduplicate by ID
+      const seen = new Set(staticModels.map(m => m.id));
+      const allModels = [...staticModels];
+      for (const m of providerModels) {
+        if (!seen.has(m.id)) {
+          allModels.push(m);
+          seen.add(m.id);
+        }
+      }
+
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ object: "list", data: models }));
+      res.end(JSON.stringify({ object: "list", data: allModels }));
       return;
     }
 
@@ -1956,6 +1984,7 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
   return {
     port,
     baseUrl,
+    server,
     close: () =>
       new Promise<void>((res, rej) => {
         const timeout = setTimeout(() => {
@@ -2184,8 +2213,7 @@ async function proxyRequest(
         : [];
       const lastUserMsg = [...parsedMessages].reverse().find((m) => m.role === "user");
 
-      // Early tool detection for ALL request types (explicit model + routing profile).
-      // The routing-profile branch may re-assign below (no-op since same value).
+      // Early tool detection
       hasTools = Array.isArray(parsed.tools) && (parsed.tools as unknown[]).length > 0;
       const rawLastContent = lastUserMsg?.content;
       const lastContent =
@@ -2198,30 +2226,198 @@ async function proxyRequest(
                 .join(" ")
             : "";
 
-      // --- Session Journal: Inject context if needed ---
-      // Check if the last user message asks about past work
-      if (sessionId && parsedMessages.length > 0) {
-        const messages = parsedMessages;
+      // --- Session ID and Context Setup ---
+      effectiveSessionId =
+        getSessionId(req.headers as Record<string, string | string[] | undefined>) ??
+        deriveSessionId(parsedMessages);
+      const existingSession = effectiveSessionId
+        ? sessionStore.getSession(effectiveSessionId)
+        : undefined;
 
-        if (sessionJournal.needsContext(lastContent)) {
-          const journalText = sessionJournal.format(sessionId);
-          if (journalText) {
-            // Find system message and prepend journal, or add a new system message
-            const sysIdx = messages.findIndex((m) => m.role === "system");
-            if (sysIdx >= 0 && typeof messages[sysIdx].content === "string") {
-              messages[sysIdx] = {
-                ...messages[sysIdx],
-                content: journalText + "\n\n" + messages[sysIdx].content,
-              };
-            } else {
-              messages.unshift({ role: "system", content: journalText });
+      const rawPrompt = lastUserMsg?.content;
+      const prompt =
+        typeof rawPrompt === "string"
+          ? rawPrompt
+          : Array.isArray(rawPrompt)
+            ? (rawPrompt as Array<{ type: string; text?: string }>)
+                .filter((b) => b.type === "text")
+                .map((b) => b.text ?? "")
+                .join(" ")
+            : "";
+      const systemMsg = parsedMessages.find((m) => m.role === "system");
+      const systemPrompt =
+        typeof systemMsg?.content === "string" ? systemMsg.content : undefined;
+
+      hasVision = parsedMessages.some((m) => {
+        if (Array.isArray(m.content)) {
+          return (m.content as Array<{ type: string }>).some((p) => p.type === "image_url");
+        }
+        return false;
+      });
+
+      // --- /model, /priority, /help slash commands ---
+      if (lastContent.startsWith("/model") || lastContent.startsWith("/priority") || lastContent.startsWith("/help")) {
+        const parts = lastContent.split(/\s+/);
+        const cmd = parts[0].toLowerCase();
+        let responseText = "";
+
+        if (cmd === "/model") {
+          const sub = parts[1]?.toLowerCase();
+          if (sub === "auto") {
+            if (effectiveSessionId) sessionStore.clearSession(effectiveSessionId);
+            responseText = "Model reset to automatic routing.";
+          } else if (sub === "list") {
+            const igniteCfg = options.igniteConfig ?? { defaultPriority: "cost", providers: [] };
+            const tiers: Record<string, string[]> = { SIMPLE: [], MEDIUM: [], COMPLEX: [], REASONING: [] };
+            for (const p of igniteCfg.providers) {
+              const tier = p.tier || "MEDIUM";
+              const cost = (p.inputPricePerMToken + p.outputPricePerMToken) / 2;
+              tiers[tier].push(`${p.id} ($${cost.toFixed(2)}/M)`);
             }
-            parsed.messages = messages;
-            bodyModified = true;
-            console.log(
-              `[ClawRouter] Injected session journal (${journalText.length} chars) for session ${sessionId.slice(0, 8)}...`,
-            );
+            responseText = [
+              "Configured providers:",
+              `simple tier:  ${tiers.SIMPLE.join(", ") || "none"}`,
+              `medium tier:  ${tiers.MEDIUM.join(", ") || "none"}`,
+              `complex tier: ${tiers.COMPLEX.join(", ") || "none"}`,
+              `expert tier:  ${tiers.REASONING.join(", ") || "none"}`,
+              `Current priority: ${igniteCfg.defaultPriority}`,
+              "Use /model <id> to override, /priority <mode> to change ranking."
+            ].join("\n");
+          } else if (parts[1]) {
+            responseText = `Model override set to ${parts[1]}.`;
+          } else {
+            responseText = "Usage: /model <id> | auto | list";
           }
+        } else if (cmd === "/priority") {
+          const mode = parts[1]?.toLowerCase();
+          if (mode === "cost" || mode === "speed" || mode === "quality") {
+            if (effectiveSessionId) {
+              sessionStore.setSessionPriority(effectiveSessionId, mode as any);
+              responseText = `Routing priority changed to ${mode} for this session.`;
+            } else {
+              responseText = "Could not identify session to set priority.";
+            }
+          } else {
+            responseText = "Usage: /priority cost | speed | quality";
+          }
+        } else if (cmd === "/help") {
+          responseText = [
+            "IgniteRouter Commands:",
+            "  /model <id>        - Switch to specific model",
+            "  /model auto        - Reset to automatic routing",
+            "  /model list        - List all configured models",
+            "  /priority <mode>   - Change ranking (cost|speed|quality)",
+            "  /debug             - Show routing diagnostics",
+            "  /imagegen <prompt> - Generate an image",
+            "  /help              - Show this help"
+          ].join("\n");
+        }
+
+        if (responseText) {
+          const completionId = `chatcmpl-cmd-${Date.now()}`;
+          const timestamp = Math.floor(Date.now() / 1000);
+          const syntheticResponse = {
+            id: completionId,
+            object: "chat.completion",
+            created: timestamp,
+            model: "igniterouter/command",
+            choices: [{ index: 0, message: { role: "assistant", content: responseText }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+          };
+
+          if (isStreaming) {
+            res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+            res.write(`data: ${JSON.stringify({ ...syntheticResponse, object: "chat.completion.chunk", choices: [{ index: 0, delta: { role: "assistant", content: responseText }, finish_reason: null }] })}\n\n`);
+            res.write(`data: ${JSON.stringify({ ...syntheticResponse, object: "chat.completion.chunk", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`);
+            res.write("data: [DONE]\n\n");
+            res.end();
+          } else {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify(syntheticResponse));
+          }
+          return;
+        }
+      }
+
+      // --- IgniteRouter: use new routing engine when providers are configured ---
+      const igniteCfg = { ...(options.igniteConfig ?? { defaultPriority: "cost" as const, providers: [] }) };
+      if (effectiveSessionId) {
+        const sess = sessionStore.getSession(effectiveSessionId);
+        if (sess?.priority) {
+          igniteCfg.defaultPriority = sess.priority;
+        }
+      }
+      const useIgniteRouting = igniteCfg.providers && igniteCfg.providers.length > 0;
+
+      if (useIgniteRouting) {
+        console.log(`[IgniteRouter] Using ignite routing engine with ${igniteCfg.providers.length} provider(s)`);
+
+        const routingContext: RoutingContext = {
+          messages: parsedMessages,
+          tools: parsed.tools as unknown[],
+          requestedModel: typeof parsed.model === "string" ? parsed.model : undefined,
+          estimatedTokens: estimateTokenCount(parsedMessages),
+          needsStreaming: parsed.stream === true,
+        };
+
+        const igniteDecision = await igniteRoute(routingContext, igniteCfg);
+
+        if (igniteDecision.error) {
+          console.log(`[IgniteRouter] Routing error: ${igniteDecision.error}`);
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: { message: igniteDecision.error, type: "invalid_request_error" } }));
+          return;
+        }
+
+        const igniteCandidates = igniteDecision.candidateProviders.map((p) => ({ provider: p, priorityScore: 0, reasons: [] as string[] }));
+
+        const buildRequestInit = (provider: UserProvider): { url: string; init: RequestInit } => {
+          const { url, headers: providerHeaders, body: providerBody } = buildUpstreamRequest(provider, JSON.parse(body.toString()));
+          const headersObj: Record<string, string> = { ...providerHeaders };
+          for (const [key, val] of Object.entries(req.headers)) {
+            if (key.toLowerCase() !== "host" && key.toLowerCase() !== "authorization" && !providerHeaders[key]) {
+              headersObj[key] = Array.isArray(val) ? (val[0] ?? "") : (val ?? "");
+            }
+          }
+          headersObj["Content-Type"] = "application/json";
+          headersObj["User-Agent"] = USER_AGENT;
+          return { url, init: { method: "POST", headers: headersObj, body: JSON.stringify(providerBody) } };
+        };
+
+        const fallbackResult = await callWithFallback(igniteCandidates, (provider) => buildRequestInit(provider), { timeoutMs: options.requestTimeoutMs ?? 30000, retryableOnly: true });
+
+        if (!fallbackResult.success) {
+          console.log(`[IgniteRouter] All models failed: ${fallbackResult.errorSummary}`);
+          res.writeHead(503, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: { message: fallbackResult.errorSummary ?? "All models failed", type: "service_unavailable" } }));
+          return;
+        }
+
+        if (fallbackResult.finalResponse) {
+          res.statusCode = fallbackResult.finalResponse.status;
+          fallbackResult.finalResponse.headers.forEach((value, key) => {
+            if (key.toLowerCase() !== "transfer-encoding" && key.toLowerCase() !== "content-length" && key.toLowerCase() !== "connection") {
+              res.setHeader(key, value);
+            }
+          });
+
+          const usedProvider = fallbackResult.usedProvider as UserProvider;
+          res.setHeader("X-IgniteRouter-Model", usedProvider.id);
+          res.setHeader("X-IgniteRouter-Tier", igniteDecision.tier || "UNKNOWN");
+          res.setHeader("X-IgniteRouter-Task", igniteDecision.taskType || "UNKNOWN");
+          res.setHeader("X-IgniteRouter-Latency", `${Date.now() - startTime}ms`);
+
+          if (fallbackResult.finalResponse.body) {
+            const s = Readable.fromWeb(fallbackResult.finalResponse.body as any);
+            finished(s, (err) => {
+              if (err && err.code !== "ERR_STREAM_DESTROYED")
+                console.error(`[IgniteRouter] Stream error: ${err.message}`);
+            });
+            s.pipe(res);
+          } else {
+            res.end();
+          }
+          return;
         }
       }
 
@@ -2862,137 +3058,6 @@ async function proxyRequest(
           });
           if (hasVision) {
             console.log(`[ClawRouter] Vision content detected, filtering to vision-capable models`);
-          }
-
-          // --- IgniteRouter: use new routing engine when providers are configured ---
-          const igniteCfg = options.igniteConfig ?? { defaultPriority: "cost", providers: [] };
-          const useIgniteRouting = igniteCfg.providers && igniteCfg.providers.length > 0;
-
-          if (useIgniteRouting) {
-            console.log(
-              `[IgniteRouter] Using ignite routing engine with ${igniteCfg.providers.length} provider(s)`,
-            );
-
-            const routingContext: RoutingContext = {
-              messages: parsedMessages,
-              tools: parsed.tools as unknown[],
-              requestedModel: typeof parsed.model === "string" ? parsed.model : undefined,
-              estimatedTokens: estimateTokenCount(parsedMessages),
-              needsStreaming: parsed.stream === true,
-            };
-
-            const igniteDecision = await igniteRoute(routingContext, igniteCfg);
-
-            if (igniteDecision.error) {
-              console.log(`[IgniteRouter] Routing error: ${igniteDecision.error}`);
-              res.writeHead(400, { "Content-Type": "application/json" });
-              res.end(JSON.stringify({ error: igniteDecision.error }));
-              return;
-            }
-
-            if (igniteDecision.override?.detected) {
-              console.log(
-                `[IgniteRouter] Override detected: ${igniteDecision.override.source} -> ${igniteDecision.override.modelId}`,
-              );
-            } else if (igniteDecision.taskType) {
-              console.log(
-                `[IgniteRouter] Task: ${igniteDecision.taskType}, Tier: ${igniteDecision.tier}, Score: ${igniteDecision.complexityScore?.toFixed(2)}`,
-              );
-            }
-
-            // Map ignite candidates to the fallback chain format
-            const igniteCandidates = igniteDecision.candidateProviders.map((p) => ({
-              provider: p,
-              priorityScore: 0,
-              reasons: [] as string[],
-            }));
-
-            // Build the upstream URL
-            const apiBase = options.apiBase ?? BLOCKRUN_API;
-            const upstreamUrl = `${apiBase}${req.url}`;
-
-            const buildRequestInit = (providerId: string): RequestInit => {
-              const headersObj: Record<string, string> = {};
-              for (const [key, val] of Object.entries(req.headers)) {
-                if (key.toLowerCase() !== "host") {
-                  headersObj[key] = Array.isArray(val) ? (val[0] ?? "") : (val ?? "");
-                }
-              }
-              headersObj["Content-Type"] = "application/json";
-              if (providerId && providerId !== parsed.model) {
-                const bodyObj = JSON.parse(body.toString());
-                bodyObj.model = providerId;
-                return {
-                  method: "POST",
-                  headers: headersObj,
-                  body: JSON.stringify(bodyObj),
-                };
-              }
-              return {
-                method: req.method ?? "POST",
-                headers: headersObj,
-                body: body,
-              };
-            };
-
-            // Use callWithFallback for the actual model calls
-            const fallbackResult = await callWithFallback(
-              igniteCandidates,
-              (provider) => {
-                const init = buildRequestInit(provider.id);
-                return { url: upstreamUrl, init };
-              },
-              { timeoutMs: options.requestTimeoutMs ?? 30000, retryableOnly: true },
-            );
-
-            if (!fallbackResult.success) {
-              console.log(`[IgniteRouter] All models failed: ${fallbackResult.errorSummary}`);
-              res.writeHead(503, { "Content-Type": "application/json" });
-              res.end(
-                JSON.stringify({ error: fallbackResult.errorSummary ?? "All models failed" }),
-              );
-              return;
-            }
-
-            // Stream the successful response back
-            if (fallbackResult.finalResponse) {
-              res.statusCode = fallbackResult.finalResponse.status;
-              fallbackResult.finalResponse.headers.forEach((value, key) => {
-                if (
-                  key.toLowerCase() !== "transfer-encoding" &&
-                  key.toLowerCase() !== "content-length"
-                ) {
-                  res.setHeader(key, value);
-                }
-              });
-
-              if (fallbackResult.finalResponse.body) {
-                const reader = fallbackResult.finalResponse.body.getReader();
-                const stream = new ReadableStream({
-                  async start(controller) {
-                    try {
-                      while (true) {
-                        const { done, value } = await reader.read();
-                        if (done) {
-                          controller.close();
-                          return;
-                        }
-                        controller.enqueue(value);
-                      }
-                    } catch (err) {
-                      controller.error(err);
-                    }
-                  },
-                });
-
-                finished(stream as unknown as NodeJS.ReadableStream, (err) => {
-                  if (err) console.error(`[IgniteRouter] Stream error: ${err.message}`);
-                });
-
-                (stream as unknown as NodeJS.ReadableStream).pipe(res);
-              }
-              return;
-            }
           }
 
           // Always route based on current request content (ClawRouter fallback)

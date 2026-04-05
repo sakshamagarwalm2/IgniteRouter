@@ -20,6 +20,8 @@ export type SessionEntry = {
   escalated: boolean; // Whether session was already escalated via three-strike
   // --- Cost accumulation for maxCostPerRun ---
   sessionCostMicros: bigint; // Total estimated cost for this session run (USDC 6-decimal)
+  // --- Session-specific routing priority ---
+  priority?: "cost" | "speed" | "quality";
 };
 
 export type SessionConfig = {
@@ -247,6 +249,35 @@ export class SessionStore {
     const entry = this.sessions.get(sessionId);
     if (!entry) return 0;
     return Number(entry.sessionCostMicros) / 1_000_000;
+  }
+
+  /**
+   * Set the routing priority for a session.
+   */
+  setSessionPriority(sessionId: string, priority: "cost" | "speed" | "quality"): void {
+    if (!this.config.enabled || !sessionId) {
+      return;
+    }
+
+    const entry = this.sessions.get(sessionId);
+    if (entry) {
+      entry.priority = priority;
+    } else {
+      // Create session if it doesn't exist just to store priority
+      const now = Date.now();
+      this.sessions.set(sessionId, {
+        model: "",
+        tier: "DIRECT",
+        createdAt: now,
+        lastUsedAt: now,
+        requestCount: 0,
+        recentHashes: [],
+        strikes: 0,
+        escalated: false,
+        sessionCostMicros: 0n,
+        priority,
+      });
+    }
   }
 
   /**

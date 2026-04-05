@@ -719,6 +719,7 @@ export default plugin;
 export { startProxy, getProxyPort } from "./proxy.js";
 export type { ProxyOptions, ProxyHandle } from "./proxy.js";
 export { igniteProvider } from "./provider.js";
+export { loadProviders } from "./user-providers.js";
 export {
   OPENCLAW_MODELS,
   BLOCKRUN_MODELS,

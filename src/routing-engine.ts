@@ -70,7 +70,7 @@ export async function route(
       return {
         override,
         candidateProviders: [],
-        error: `Model ${override.modelId} is not in your provider list. Add it to openclaw.yaml.`,
+        error: `Model '${override.modelId}' is not configured in IgniteRouter. Add it to your provider list or use igniterouter/auto for automatic routing.`,
         latencyMs: Date.now() - startTime,
       };
     }
@@ -83,7 +83,7 @@ export async function route(
       return {
         override,
         candidateProviders: [],
-        error: `Model ${override.modelId} is not in your provider list. Add it to openclaw.yaml.`,
+        error: `Model '${override.modelId}' is not configured in IgniteRouter. Add it to your provider list or use igniterouter/auto for automatic routing.`,
         latencyMs: Date.now() - startTime,
       };
     }

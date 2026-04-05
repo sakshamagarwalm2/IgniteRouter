@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Smart LLM router — route requests to the right model with automatic fallback",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "./dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
     "igniterouter": "./dist/cli.js"
@@ -14,10 +14,7 @@
     ]
   },
   "exports": {
-    ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    }
+    ".": "./dist/index.js"
   },
   "files": [
     "dist",
@@ -31,7 +28,9 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "vitest run",
-    "test:all": "vitest run",
+    "test:install": "bash test/openclaw-install.sh",
+    "test:integration": "vitest run test/integration-flow.test.ts test/provider-urls.test.ts",
+    "test:all": "vitest run && npm run test:install",
     "test:unit": "vitest run src/task-classifier.test.ts src/complexity-scorer.test.ts src/user-providers.test.ts src/routing-engine.test.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",

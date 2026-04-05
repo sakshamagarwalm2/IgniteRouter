@@ -25,6 +25,7 @@ export interface FallbackResult {
   attempts: AttemptResult[];
   finalResponse?: Response;
   errorSummary?: string;
+  usedProvider?: UserProvider;
 }
 
 export interface FallbackOptions {
@@ -93,6 +94,7 @@ export async function callWithFallback(
           success: true,
           attempts,
           finalResponse: response,
+          usedProvider: candidate.provider,
         };
       }
 

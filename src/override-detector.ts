@@ -8,7 +8,7 @@ export interface OverrideResult {
   notConfigured?: boolean;
 }
 
-const AUTO_ROUTING_VALUES = ["smartrouter/auto", "ignite/auto", "auto", "blockrun/auto"];
+const AUTO_ROUTING_VALUES = ["smartrouter/auto", "igniterouter/auto", "ignite/auto", "auto", "blockrun/auto"];
 
 const ALIAS_MAP: Record<string, string> = {
   "gpt-4o": "openai/gpt-4o",

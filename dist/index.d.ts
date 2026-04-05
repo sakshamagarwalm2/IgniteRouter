@@ -1,3 +1,5 @@
+import * as node_http from 'node:http';
+
 /**
  * OpenClaw Plugin Types (locally defined)
  *
@@ -337,6 +339,7 @@ interface IgniteConfig {
     defaultPriority: ProviderPriority;
     providers: UserProvider[];
 }
+declare function loadProviders(rawConfig: unknown): IgniteConfig;
 
 /**
  * Response Cache for LLM Completions
@@ -440,6 +443,7 @@ type SessionEntry = {
     strikes: number;
     escalated: boolean;
     sessionCostMicros: bigint;
+    priority?: "cost" | "speed" | "quality";
 };
 type SessionConfig = {
     /** Enable session persistence (default: false) */
@@ -520,6 +524,10 @@ declare class SessionStore {
      */
     getSessionCostUsd(sessionId: string): number;
     /**
+     * Set the routing priority for a session.
+     */
+    setSessionPriority(sessionId: string, priority: "cost" | "speed" | "quality"): void;
+    /**
      * Stop the cleanup interval.
      */
     close(): void;
@@ -534,23 +542,6 @@ declare function getSessionId(headers: Record<string, string | string[] | undefi
  * Normalizes whitespace to avoid false negatives from minor formatting diffs.
  */
 declare function hashRequestContent(lastUserContent: string, toolCallNames?: string[]): string;
-
-/**
- * Local Proxy Server
- *
- * Sits between OpenClaw's pi-ai (which makes standard OpenAI-format requests)
- * and BlockRun's API.
- *
- * Flow:
- *   pi-ai → http://localhost:{port}/v1/chat/completions
- *        → proxy forwards to https://blockrun.ai/api/v1/chat/completions
- *        → streams response back to pi-ai
- *
- * Optimizations:
- *   - Response dedup: hashes request bodies and caches responses for 30s
- *   - Smart routing: when model is "ignite/auto", classify query and pick cheapest model
- *   - Usage logging: log every request as JSON line to ~/.openclaw/ignite/logs/
- */
 
 /**
  * Get the proxy port from pre-loaded configuration.
@@ -578,6 +569,7 @@ type ProxyOptions = {
 type ProxyHandle = {
     port: number;
     baseUrl: string;
+    server?: node_http.Server;
     close: () => Promise<void>;
 };
 /**
@@ -927,4 +919,4 @@ declare function buildPartnerTools(proxyBaseUrl: string): PartnerToolDefinition[
 
 declare const plugin: OpenClawPluginDefinition;
 
-export { type AggregatedStats, BLOCKRUN_MODELS, type CachedLLMResponse, type CachedResponse, DEFAULT_RETRY_CONFIG, DEFAULT_ROUTING_CONFIG, DEFAULT_SESSION_CONFIG, type DailyStats, MODEL_ALIASES, OPENCLAW_MODELS, PARTNER_SERVICES, type PartnerServiceDefinition, type PartnerToolDefinition, type ProxyHandle, type ProxyOptions, RequestDeduplicator, ResponseCache, type ResponseCacheConfig, type RetryConfig, type RoutingConfig, type RoutingDecision, type SessionConfig, type SessionEntry, SessionStore, type Tier, type UsageEntry, buildPartnerTools, buildProviderModels, calculateModelCost, clearStats, plugin as default, fetchWithRetry, formatStatsAscii, getAgenticModels, getFallbackChain, getFallbackChainFiltered, getModelContextWindow, getPartnerService, getProxyPort, getSessionId, getStats, hashRequestContent, igniteProvider, isAgenticModel, isRetryable, logUsage, resolveModelAlias, route, startProxy };
+export { type AggregatedStats, BLOCKRUN_MODELS, type CachedLLMResponse, type CachedResponse, DEFAULT_RETRY_CONFIG, DEFAULT_ROUTING_CONFIG, DEFAULT_SESSION_CONFIG, type DailyStats, MODEL_ALIASES, OPENCLAW_MODELS, PARTNER_SERVICES, type PartnerServiceDefinition, type PartnerToolDefinition, type ProxyHandle, type ProxyOptions, RequestDeduplicator, ResponseCache, type ResponseCacheConfig, type RetryConfig, type RoutingConfig, type RoutingDecision, type SessionConfig, type SessionEntry, SessionStore, type Tier, type UsageEntry, buildPartnerTools, buildProviderModels, calculateModelCost, clearStats, plugin as default, fetchWithRetry, formatStatsAscii, getAgenticModels, getFallbackChain, getFallbackChainFiltered, getModelContextWindow, getPartnerService, getProxyPort, getSessionId, getStats, hashRequestContent, igniteProvider, isAgenticModel, isRetryable, loadProviders, logUsage, resolveModelAlias, route, startProxy };

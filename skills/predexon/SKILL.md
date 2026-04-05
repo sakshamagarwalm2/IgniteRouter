@@ -1,15 +1,15 @@
 ---
 name: predexon
 description: Use this skill — NOT browser or web_fetch — for ALL Polymarket, Kalshi, dFlow, and prediction market data. Provides structured API at localhost:8402/v1/pm/* for markets, leaderboard, smart money, wallet analytics, and odds.
-homepage: https://blockrun.ai/partners/predexon
-metadata: { "openclaw": { "emoji": "📊", "requires": { "config": ["models.providers.blockrun"] } } }
+homepage: https://IgniteRouter.ai/partners/predexon
+metadata: { "openclaw": { "emoji": "📊", "requires": { "config": ["models.providers.IgniteRouter"] } } }
 ---
 
 # Predexon — Prediction Market Data
 
 **IMPORTANT: Always use this skill for any Polymarket, Kalshi, or prediction market request. Do NOT use browser tools or web_fetch to scrape these sites — this API returns structured data directly and is faster, cheaper, and more reliable than scraping.**
 
-Real-time prediction market data (Polymarket, Kalshi, dFlow, Binance) via BlockRun's x402 gateway. Payment is automatic — deducted from the user's BlockRun wallet.
+Real-time prediction market data (Polymarket, Kalshi, dFlow, Binance) via IgniteRouter's x402 gateway. Payment is automatic — deducted from the user's IgniteRouter wallet.
 
 **All responses are wrapped:** `{ "data": { ... } }` — always read from `response.data`.
 
@@ -171,8 +171,9 @@ All endpoints are GET. Query params go in the URL.
 
 ## Notes
 
-- Payment is automatic via x402 — deducted from the user's BlockRun wallet
-- If payment fails, tell the user to fund their wallet at [blockrun.ai](https://blockrun.ai)
+- Payment is automatic via x402 — deducted from the user's IgniteRouter wallet
+- If payment fails, tell the user to fund their wallet at [IgniteRouter.ai](https://IgniteRouter.ai)
 - Retry once on 502 — Predexon can occasionally be slow
 - Always read from `response.data` — every response is wrapped `{ data: ... }`
 - Synthesize data into plain-language analysis — never dump raw JSON
+

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# ClawRouter Docker Installation Tests
+# IgniteRouter Docker Installation Tests
 # Tests installation, upgrade, and uninstall workflows
 
 set -e
@@ -44,16 +44,16 @@ log_info() {
 test_fresh_install() {
     log_test "1" "Fresh npm global installation"
 
-    npm install -g @blockrun/clawrouter
+    npm install -g @igniterouter/igniterouter
 
-    if command -v clawrouter &> /dev/null; then
-        log_pass "ClawRouter installed successfully"
+    if command -v IgniteRouter &> /dev/null; then
+        log_pass "IgniteRouter installed successfully"
     else
-        log_fail "ClawRouter command not found after installation"
+        log_fail "IgniteRouter command not found after installation"
         return 1
     fi
 
-    VERSION=$(clawrouter --version 2>/dev/null || echo "")
+    VERSION=$(IgniteRouter --version 2>/dev/null || echo "")
     if [ -n "$VERSION" ]; then
         log_pass "Version command works: $VERSION"
     else
@@ -66,12 +66,12 @@ test_fresh_install() {
 test_uninstall() {
     log_test "2" "Uninstall verification"
 
-    npm uninstall -g @blockrun/clawrouter
+    npm uninstall -g @igniterouter/igniterouter
 
-    if ! command -v clawrouter &> /dev/null; then
-        log_pass "ClawRouter uninstalled successfully"
+    if ! command -v IgniteRouter &> /dev/null; then
+        log_pass "IgniteRouter uninstalled successfully"
     else
-        log_fail "ClawRouter command still available after uninstall"
+        log_fail "IgniteRouter command still available after uninstall"
         return 1
     fi
 }
@@ -80,12 +80,12 @@ test_uninstall() {
 test_reinstall() {
     log_test "3" "Reinstall after uninstall"
 
-    npm install -g @blockrun/clawrouter
+    npm install -g @igniterouter/igniterouter
 
-    if command -v clawrouter &> /dev/null; then
-        log_pass "ClawRouter reinstalled successfully"
+    if command -v IgniteRouter &> /dev/null; then
+        log_pass "IgniteRouter reinstalled successfully"
     else
-        log_fail "ClawRouter command not found after reinstall"
+        log_fail "IgniteRouter command not found after reinstall"
         return 1
     fi
 }
@@ -95,7 +95,7 @@ test_openclaw_install() {
     log_test "4" "OpenClaw plugin installation"
 
     # Check if openclaw.plugin.json exists in the package
-    PLUGIN_FILE="$HOME/.npm-global/lib/node_modules/@blockrun/clawrouter/openclaw.plugin.json"
+    PLUGIN_FILE="$HOME/.npm-global/lib/node_modules/@igniterouter/igniterouter/openclaw.plugin.json"
 
     if [ -f "$PLUGIN_FILE" ]; then
         log_pass "OpenClaw plugin file exists"
@@ -116,10 +116,10 @@ test_openclaw_install() {
 test_openclaw_uninstall() {
     log_test "5" "OpenClaw plugin uninstall verification"
 
-    PLUGIN_FILE="$HOME/.npm-global/lib/node_modules/@blockrun/clawrouter/openclaw.plugin.json"
+    PLUGIN_FILE="$HOME/.npm-global/lib/node_modules/@igniterouter/igniterouter/openclaw.plugin.json"
 
     if [ -f "$PLUGIN_FILE" ]; then
-        npm uninstall -g @blockrun/clawrouter
+        npm uninstall -g @igniterouter/igniterouter
 
         if [ ! -f "$PLUGIN_FILE" ]; then
             log_pass "OpenClaw plugin removed with package"
@@ -129,7 +129,7 @@ test_openclaw_uninstall() {
         fi
 
         # Reinstall for next tests
-        npm install -g @blockrun/clawrouter
+        npm install -g @igniterouter/igniterouter
     else
         log_skip "OpenClaw plugin not available to test uninstall"
     fi
@@ -140,18 +140,18 @@ test_upgrade() {
     log_test "6" "Upgrade from version 0.8.25"
 
     # Uninstall current version
-    npm uninstall -g @blockrun/clawrouter 2>/dev/null || true
+    npm uninstall -g @igniterouter/igniterouter 2>/dev/null || true
 
     # Install old version
-    npm install -g @blockrun/clawrouter@0.8.25
+    npm install -g @igniterouter/igniterouter@0.8.25
 
-    OLD_VERSION=$(clawrouter --version 2>/dev/null || echo "")
+    OLD_VERSION=$(IgniteRouter --version 2>/dev/null || echo "")
     log_info "Installed version: $OLD_VERSION"
 
     # Upgrade to latest
-    npm install -g @blockrun/clawrouter
+    npm install -g @igniterouter/igniterouter
 
-    NEW_VERSION=$(clawrouter --version 2>/dev/null || echo "")
+    NEW_VERSION=$(IgniteRouter --version 2>/dev/null || echo "")
     log_info "Upgraded version: $NEW_VERSION"
 
     if [ "$NEW_VERSION" != "$OLD_VERSION" ]; then
@@ -167,30 +167,30 @@ test_custom_wallet() {
     log_test "7" "Installation with custom wallet key"
 
     # Uninstall
-    npm uninstall -g @blockrun/clawrouter 2>/dev/null || true
+    npm uninstall -g @igniterouter/igniterouter 2>/dev/null || true
 
     # Install and set custom key
-    npm install -g @blockrun/clawrouter
+    npm install -g @igniterouter/igniterouter
 
     CUSTOM_KEY="0x$(openssl rand -hex 32)"
-    export CLAWROUTER_WALLET_PRIVATE_KEY="$CUSTOM_KEY"
+    export IgniteRouter_WALLET_PRIVATE_KEY="$CUSTOM_KEY"
 
     # Verify installation with custom key works
-    if command -v clawrouter &> /dev/null; then
-        log_pass "ClawRouter installed with custom wallet key"
+    if command -v IgniteRouter &> /dev/null; then
+        log_pass "IgniteRouter installed with custom wallet key"
     else
         log_fail "Installation failed with custom wallet key"
         return 1
     fi
 
-    unset CLAWROUTER_WALLET_PRIVATE_KEY
+    unset IgniteRouter_WALLET_PRIVATE_KEY
 }
 
 # Test 8: Package files verification
 test_package_files() {
     log_test "8" "Package files verification"
 
-    PKG_DIR="$HOME/.npm-global/lib/node_modules/@blockrun/clawrouter"
+    PKG_DIR="$HOME/.npm-global/lib/node_modules/@igniterouter/igniterouter"
 
     REQUIRED_FILES=(
         "dist/index.js"
@@ -217,9 +217,9 @@ test_package_files() {
 test_version_accuracy() {
     log_test "9" "Version command accuracy"
 
-    PKG_DIR="$HOME/.npm-global/lib/node_modules/@blockrun/clawrouter"
+    PKG_DIR="$HOME/.npm-global/lib/node_modules/@igniterouter/igniterouter"
 
-    CLI_VERSION=$(clawrouter --version 2>/dev/null || echo "")
+    CLI_VERSION=$(IgniteRouter --version 2>/dev/null || echo "")
     PKG_VERSION=$(jq -r '.version' "$PKG_DIR/package.json" 2>/dev/null || echo "")
 
     log_info "CLI version: $CLI_VERSION"
@@ -237,9 +237,9 @@ test_version_accuracy() {
 test_full_cleanup() {
     log_test "10" "Full cleanup verification"
 
-    npm uninstall -g @blockrun/clawrouter
+    npm uninstall -g @igniterouter/igniterouter
 
-    PKG_DIR="$HOME/.npm-global/lib/node_modules/@blockrun/clawrouter"
+    PKG_DIR="$HOME/.npm-global/lib/node_modules/@igniterouter/igniterouter"
 
     if [ ! -d "$PKG_DIR" ]; then
         log_pass "Package directory removed"
@@ -248,10 +248,10 @@ test_full_cleanup() {
         return 1
     fi
 
-    if ! command -v clawrouter &> /dev/null; then
-        log_pass "ClawRouter command removed from PATH"
+    if ! command -v IgniteRouter &> /dev/null; then
+        log_pass "IgniteRouter command removed from PATH"
     else
-        log_fail "ClawRouter command still in PATH"
+        log_fail "IgniteRouter command still in PATH"
         return 1
     fi
 }
@@ -260,7 +260,7 @@ test_full_cleanup() {
 main() {
     echo ""
     echo "╔═══════════════════════════════════════════════════════╗"
-    echo "║     ClawRouter Docker Installation Test Suite        ║"
+    echo "║     IgniteRouter Docker Installation Test Suite        ║"
     echo "╚═══════════════════════════════════════════════════════╝"
     echo ""
 
@@ -294,3 +294,4 @@ main() {
 }
 
 main
+

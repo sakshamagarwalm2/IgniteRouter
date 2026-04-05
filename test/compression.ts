@@ -19,7 +19,7 @@ const modelCalls: string[] = [];
 const paymentAttempts: number[] = [];
 let requestBodies: string[] = [];
 
-// Mock BlockRun API server
+// Mock IgniteRouter API server
 async function startMockServer(): Promise<{ port: number; close: () => Promise<void> }> {
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const chunks: Buffer[] = [];
@@ -93,14 +93,14 @@ async function runTests() {
     }
   }
 
-  // Start mock BlockRun API
+  // Start mock IgniteRouter API
   const mockApi = await startMockServer();
   console.log(`Mock API started on port ${mockApi.port}`);
 
   // Generate an ephemeral test wallet key
   const testWalletKey = generatePrivateKey();
 
-  // Start ClawRouter proxy pointing to mock API
+  // Start IgniteRouter proxy pointing to mock API
   const proxy = await startProxy({
     wallet: testWalletKey,
     apiBase: `http://127.0.0.1:${mockApi.port}`,
@@ -108,7 +108,7 @@ async function runTests() {
     skipBalanceCheck: true,
     autoCompressRequests: true, // Enable compression
     compressionThresholdKB: 50, // Lower threshold for testing
-    onReady: (port) => console.log(`ClawRouter proxy started on port ${port}`),
+    onReady: (port) => console.log(`IgniteRouter proxy started on port ${port}`),
   });
 
   // Test 1: Small request - no compression needed
@@ -278,3 +278,4 @@ runTests().catch((err) => {
   console.error("Test failed:", err);
   process.exit(1);
 });
+

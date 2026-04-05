@@ -3,14 +3,14 @@ set -e
 set -o pipefail
 
 # ─────────────────────────────────────────────────────────────
-#  ClawRouter Update Script
+#  IgniteRouter Update Script
 #  Safe update: backs up wallet key BEFORE touching anything,
 #  restores it if the update process somehow wiped it.
 # ─────────────────────────────────────────────────────────────
 
-PLUGIN_DIR="$HOME/.openclaw/extensions/clawrouter"
+PLUGIN_DIR="$HOME/.openclaw/extensions/IgniteRouter"
 CONFIG_PATH="$HOME/.openclaw/openclaw.json"
-WALLET_FILE="$HOME/.openclaw/blockrun/wallet.key"
+WALLET_FILE="$HOME/.openclaw/IgniteRouter/wallet.key"
 WALLET_BACKUP=""
 PLUGIN_BACKUP=""
 CONFIG_BACKUP=""
@@ -29,7 +29,7 @@ restore_previous_install() {
 
   if [ "$exit_code" -ne 0 ]; then
     echo ""
-    echo "✗ Update failed. Restoring previous ClawRouter install..."
+    echo "✗ Update failed. Restoring previous IgniteRouter install..."
 
     if [ -d "$PLUGIN_DIR" ] && [ "$PLUGIN_DIR" != "$PLUGIN_BACKUP" ]; then
       rm -rf "$PLUGIN_DIR"
@@ -51,7 +51,7 @@ restore_previous_install() {
 
 run_dependency_install() {
   local plugin_dir="$1"
-  local log_file="$HOME/clawrouter-npm-install.log"
+  local log_file="$HOME/IgniteRouter-npm-install.log"
 
   echo "  (log: $log_file)"
   if (cd "$plugin_dir" && npm install --omit=dev >"$log_file" 2>&1); then
@@ -72,7 +72,7 @@ run_dependency_install() {
 trap restore_previous_install EXIT
 
 # ── Step 1: Back up wallet key ─────────────────────────────────
-echo "🦞 ClawRouter Update"
+echo "🦞 IgniteRouter Update"
 echo ""
 echo "→ Checking wallet..."
 
@@ -85,7 +85,7 @@ if [ -f "$WALLET_FILE" ]; then
     # Derive wallet address via node (viem is available post-install)
     WALLET_ADDRESS=$(node -e "
       try {
-        const { privateKeyToAccount } = require('$HOME/.openclaw/extensions/clawrouter/node_modules/viem/accounts/index.js');
+        const { privateKeyToAccount } = require('$HOME/.openclaw/extensions/IgniteRouter/node_modules/viem/accounts/index.js');
         const acct = privateKeyToAccount('$WALLET_KEY');
         console.log(acct.address);
       } catch {
@@ -94,7 +94,7 @@ if [ -f "$WALLET_FILE" ]; then
       }
     " 2>/dev/null || echo "(address check skipped)")
 
-    WALLET_BACKUP="$HOME/.openclaw/blockrun/wallet.key.bak.$(date +%s)"
+    WALLET_BACKUP="$HOME/.openclaw/IgniteRouter/wallet.key.bak.$(date +%s)"
     cp "$WALLET_FILE" "$WALLET_BACKUP"
     chmod 600 "$WALLET_BACKUP"
 
@@ -112,7 +112,7 @@ echo ""
 
 echo "→ Backing up existing install..."
 if [ -d "$PLUGIN_DIR" ]; then
-  PLUGIN_BACKUP="$HOME/.openclaw/extensions/clawrouter.backup.$(date +%s)"
+  PLUGIN_BACKUP="$HOME/.openclaw/extensions/IgniteRouter.backup.$(date +%s)"
   mv "$PLUGIN_DIR" "$PLUGIN_BACKUP"
   echo "  ✓ Plugin files staged at: $PLUGIN_BACKUP"
 else
@@ -120,7 +120,7 @@ else
 fi
 
 if [ -f "$CONFIG_PATH" ]; then
-  CONFIG_BACKUP="$CONFIG_PATH.clawrouter-update.$(date +%s).bak"
+  CONFIG_BACKUP="$CONFIG_PATH.IgniteRouter-update.$(date +%s).bak"
   cp "$CONFIG_PATH" "$CONFIG_BACKUP"
   echo "  ✓ Config backed up to: $CONFIG_BACKUP"
 fi
@@ -155,8 +155,8 @@ if (!fs.existsSync(configPath)) process.exit(0);
 try {
   const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   const entries = config?.plugins?.entries;
-  if (entries && entries.clawrouter) {
-    delete entries.clawrouter;
+  if (entries && entries.IgniteRouter) {
+    delete entries.IgniteRouter;
     const tmp = configPath + '.tmp.' + process.pid;
     fs.writeFileSync(tmp, JSON.stringify(config, null, 2));
     fs.renameSync(tmp, configPath);
@@ -177,8 +177,8 @@ const configPath = '$CONFIG_PATH';
 if (!fs.existsSync(configPath)) { console.log('  No config, skipping'); process.exit(0); }
 try {
   const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  const provider = config?.models?.providers?.blockrun;
-  if (!provider) { console.log('  No blockrun provider, skipping'); process.exit(0); }
+  const provider = config?.models?.providers?.IgniteRouter;
+  if (!provider) { console.log('  No IgniteRouter provider, skipping'); process.exit(0); }
   let changed = false;
   if (!provider.baseUrl) { provider.baseUrl = 'http://127.0.0.1:8402/v1'; changed = true; console.log('  Fixed missing baseUrl'); }
   if (!provider.apiKey) { provider.apiKey = 'x402-proxy-handles-auth'; changed = true; console.log('  Fixed missing apiKey'); }
@@ -200,8 +200,8 @@ if [ -d "$CREDS_DIR" ] && [ "$(ls -A "$CREDS_DIR" 2>/dev/null)" ]; then
   echo "  ✓ Backed up OpenClaw credentials"
 fi
 
-echo "→ Installing latest ClawRouter..."
-openclaw plugins install @blockrun/clawrouter
+echo "→ Installing latest IgniteRouter..."
+openclaw plugins install @igniterouter/igniterouter
 
 # Restore credentials after plugin install (always restore to preserve user's channels)
 if [ -n "$CREDS_BACKUP" ] && [ -d "$CREDS_BACKUP" ]; then
@@ -217,9 +217,9 @@ force_install_from_npm() {
   echo "  → Force-fetching v${version} directly from npm registry..."
   local TMPPACK
   TMPPACK=$(mktemp -d)
-  if npm pack "@blockrun/clawrouter@${version}" --pack-destination "$TMPPACK" --prefer-online >/dev/null 2>&1; then
+  if npm pack "@igniterouter/igniterouter@${version}" --pack-destination "$TMPPACK" --prefer-online >/dev/null 2>&1; then
     local TARBALL
-    TARBALL=$(ls "$TMPPACK"/blockrun-clawrouter-*.tgz 2>/dev/null | head -1)
+    TARBALL=$(ls "$TMPPACK"/IgniteRouter-IgniteRouter-*.tgz 2>/dev/null | head -1)
     if [ -n "$TARBALL" ]; then
       rm -rf "$PLUGIN_DIR"
       mkdir -p "$PLUGIN_DIR"
@@ -236,13 +236,13 @@ force_install_from_npm() {
 
 if [ -d "$PLUGIN_DIR" ] && [ -f "$PLUGIN_DIR/package.json" ]; then
   INSTALLED_VER=$(node -e "try{const p=require('$PLUGIN_DIR/package.json');console.log(p.version);}catch{console.log('');}" 2>/dev/null || echo "")
-  LATEST_VER=$(npm view @blockrun/clawrouter@latest version 2>/dev/null || echo "")
+  LATEST_VER=$(npm view @igniterouter/igniterouter@latest version 2>/dev/null || echo "")
   if [ -n "$LATEST_VER" ] && [ -n "$INSTALLED_VER" ] && [ "$INSTALLED_VER" != "$LATEST_VER" ]; then
     echo "  ⚠️  openclaw installed v${INSTALLED_VER} (cached) but latest is v${LATEST_VER}"
     force_install_from_npm "$LATEST_VER" || true
   fi
   INSTALLED_VER=$(node -e "try{const p=require('$PLUGIN_DIR/package.json');console.log(p.version);}catch{console.log('?');}" 2>/dev/null || echo "?")
-  echo "  ✓ ClawRouter v${INSTALLED_VER} installed"
+  echo "  ✓ IgniteRouter v${INSTALLED_VER} installed"
 fi
 
 # ── Step 4c: Ensure all dependencies are installed ────────────
@@ -271,7 +271,7 @@ if [ -f "$WALLET_FILE" ]; then
       echo "  ✓ Restored from backup: $WALLET_BACKUP"
     else
       echo "  ✗ No backup available — wallet key is lost"
-      echo "     Restore manually: set BLOCKRUN_WALLET_KEY env var"
+      echo "     Restore manually: set IgniteRouter_WALLET_KEY env var"
     fi
   fi
 else
@@ -310,9 +310,9 @@ if (fs.existsSync(authPath)) {
   } catch {}
 }
 
-const profileKey = 'blockrun:default';
+const profileKey = 'IgniteRouter:default';
 if (!store.profiles[profileKey]) {
-  store.profiles[profileKey] = { type: 'api_key', provider: 'blockrun', key: 'x402-proxy-handles-auth' };
+  store.profiles[profileKey] = { type: 'api_key', provider: 'IgniteRouter', key: 'x402-proxy-handles-auth' };
   atomicWrite(authPath, JSON.stringify(store, null, 2));
   console.log('  Auth profile created');
 } else {
@@ -365,12 +365,12 @@ try {
   }
 
   const allowlist = config.agents.defaults.models;
-  const currentKeys = new Set(TOP_MODELS.map(id => 'blockrun/' + id));
+  const currentKeys = new Set(TOP_MODELS.map(id => 'IgniteRouter/' + id));
 
-  // Remove any blockrun/* entries not in the current TOP_MODELS list
+  // Remove any IgniteRouter/* entries not in the current TOP_MODELS list
   let removed = 0;
   for (const key of Object.keys(allowlist)) {
-    if (key.startsWith('blockrun/') && !currentKeys.has(key)) {
+    if (key.startsWith('IgniteRouter/') && !currentKeys.has(key)) {
       delete allowlist[key];
       removed++;
     }
@@ -379,7 +379,7 @@ try {
   // Add any missing current models
   let added = 0;
   for (const id of TOP_MODELS) {
-    const key = 'blockrun/' + id;
+    const key = 'IgniteRouter/' + id;
     if (!allowlist[key]) {
       allowlist[key] = {};
       added++;
@@ -407,7 +407,7 @@ try {
 
 # ── Summary ─────────────────────────────────────────────────────
 echo ""
-echo "✓ ClawRouter updated successfully!"
+echo "✓ IgniteRouter updated successfully!"
 echo ""
 
 # Show final wallet address
@@ -415,7 +415,7 @@ if [ -f "$WALLET_FILE" ]; then
   FINAL_KEY=$(cat "$WALLET_FILE" | tr -d '[:space:]')
   FINAL_ADDRESS=$(node -e "
     try {
-      const { privateKeyToAccount } = require('$HOME/.openclaw/extensions/clawrouter/node_modules/viem/accounts/index.js');
+      const { privateKeyToAccount } = require('$HOME/.openclaw/extensions/IgniteRouter/node_modules/viem/accounts/index.js');
       console.log(privateKeyToAccount('$FINAL_KEY').address);
     } catch { console.log('(run /wallet in OpenClaw to see your address)'); }
   " 2>/dev/null || echo "(run /wallet in OpenClaw to see your address)")
@@ -431,10 +431,11 @@ echo ""
 echo "  Run: openclaw gateway restart"
 echo ""
 echo "  Commands:"
-echo "    npx @blockrun/clawrouter report            # daily usage report"
-echo "    npx @blockrun/clawrouter report weekly      # weekly report"
-echo "    npx @blockrun/clawrouter report monthly     # monthly report"
-echo "    npx @blockrun/clawrouter doctor             # AI diagnostics"
+echo "    npx @igniterouter/igniterouter report            # daily usage report"
+echo "    npx @igniterouter/igniterouter report weekly      # weekly report"
+echo "    npx @igniterouter/igniterouter report monthly     # monthly report"
+echo "    npx @igniterouter/igniterouter doctor             # AI diagnostics"
 echo ""
 echo "  ⚠  Back up your wallet key: /wallet export  (in OpenClaw)"
 echo ""
+

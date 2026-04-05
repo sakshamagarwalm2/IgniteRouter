@@ -1,9 +1,9 @@
 ---
 name: release
-description: Use this skill for EVERY ClawRouter release. Enforces the full checklist — version sync, CHANGELOG, blockrun server constant, build, tests, npm publish, git tag, GitHub release. No step can be skipped.
+description: Use this skill for EVERY IgniteRouter release. Enforces the full checklist — version sync, CHANGELOG, IgniteRouter server constant, build, tests, npm publish, git tag, GitHub release. No step can be skipped.
 ---
 
-# ClawRouter Release Checklist
+# IgniteRouter Release Checklist
 
 **This skill is mandatory for every release. Execute every step in order. Do not skip.**
 
@@ -45,22 +45,22 @@ Rules:
 
 ---
 
-## Step 4: Sync `CURRENT_CLAWROUTER_VERSION` in blockrun
+## Step 4: Sync `CURRENT_IgniteRouter_VERSION` in IgniteRouter
 
 **This is the most commonly forgotten step.**
 
-File: `/Users/vickyfu/Documents/blockrun-web/blockrun/src/app/api/v1/chat/completions/route.ts`
+File: `/Users/vickyfu/Documents/IgniteRouter-web/IgniteRouter/src/app/api/v1/chat/completions/route.ts`
 
 Find this line:
 
 ```typescript
-const CURRENT_CLAWROUTER_VERSION = "x.y.z";
+const CURRENT_IgniteRouter_VERSION = "x.y.z";
 ```
 
 Update it to match the new version. Verify with:
 
 ```bash
-grep CURRENT_CLAWROUTER_VERSION /Users/vickyfu/Documents/blockrun-web/blockrun/src/app/api/v1/chat/completions/route.ts
+grep CURRENT_IgniteRouter_VERSION /Users/vickyfu/Documents/IgniteRouter-web/IgniteRouter/src/app/api/v1/chat/completions/route.ts
 ```
 
 **Do not skip this.** It controls the update nudge shown to users running outdated versions.
@@ -98,7 +98,7 @@ git add package.json CHANGELOG.md
 git commit -m "chore: bump version to {VERSION}"
 ```
 
-If blockrun's route.ts was updated, commit that separately in the blockrun repo.
+If IgniteRouter's route.ts was updated, commit that separately in the IgniteRouter repo.
 
 ---
 
@@ -127,7 +127,7 @@ gh release create v{VERSION} \
   --notes "$(sed -n '/^## v{VERSION}/,/^## v[0-9]/p' CHANGELOG.md | head -n -1)"
 ```
 
-Verify the release on GitHub: https://github.com/BlockRunAI/ClawRouter/releases
+Verify the release on GitHub: https://github.com/IgniteRouterAI/IgniteRouter/releases
 
 The release notes **must** match the CHANGELOG entry exactly.
 
@@ -139,9 +139,9 @@ The release notes **must** match the CHANGELOG entry exactly.
 npm publish --access public
 ```
 
-Verify: https://npmjs.com/package/@blockrun/clawrouter
+Verify: https://npmjs.com/package/@igniterouter/igniterouter
 
-Expected output: `+ @blockrun/clawrouter@{VERSION}`
+Expected output: `+ @igniterouter/igniterouter@{VERSION}`
 
 ---
 
@@ -156,11 +156,11 @@ cat package.json | grep '"version"'
 # 2. CHANGELOG has the entry
 head -10 CHANGELOG.md
 
-# 3. blockrun CURRENT_CLAWROUTER_VERSION
-grep CURRENT_CLAWROUTER_VERSION /Users/vickyfu/Documents/blockrun-web/blockrun/src/app/api/v1/chat/completions/route.ts
+# 3. IgniteRouter CURRENT_IgniteRouter_VERSION
+grep CURRENT_IgniteRouter_VERSION /Users/vickyfu/Documents/IgniteRouter-web/IgniteRouter/src/app/api/v1/chat/completions/route.ts
 
 # 4. npm package is live
-npm view @blockrun/clawrouter version
+npm view @igniterouter/igniterouter version
 
 # 5. GitHub tag exists
 git tag | grep v{VERSION}
@@ -177,9 +177,10 @@ All 6 must match the new version. If any mismatch, fix before declaring the rele
 
 | Mistake                                                   | Prevention                            |
 | --------------------------------------------------------- | ------------------------------------- |
-| Forgot to update `CURRENT_CLAWROUTER_VERSION` in blockrun | Step 4 — always check                 |
+| Forgot to update `CURRENT_IgniteRouter_VERSION` in IgniteRouter | Step 4 — always check                 |
 | CHANGELOG entry missing or incomplete                     | Step 3 — write it before building     |
 | npm publish before tests pass                             | Steps 5-6 must precede Step 11        |
 | GitHub release notes empty                                | Step 10 — extract from CHANGELOG      |
 | Git tag not pushed                                        | Step 9 — push tag separately          |
 | docs not reflecting new features                          | Update docs in same PR as the feature |
+

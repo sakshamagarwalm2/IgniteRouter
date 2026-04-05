@@ -268,9 +268,9 @@ type RoutingConfig = {
     tiers: Record<Tier, TierConfig>;
     /** Tier configs for agentic mode - models that excel at multi-step tasks */
     agenticTiers?: Record<Tier, TierConfig>;
-    /** Tier configs for eco profile - ultra cost-optimized (blockrun/eco) */
+    /** Tier configs for eco profile - ultra cost-optimized (IgniteRouter/eco) */
     ecoTiers?: Record<Tier, TierConfig>;
-    /** Tier configs for premium profile - best quality (blockrun/premium) */
+    /** Tier configs for premium profile - best quality (IgniteRouter/premium) */
     premiumTiers?: Record<Tier, TierConfig>;
     /** Time-windowed promotions that temporarily override tier routing */
     promotions?: Promotion[];
@@ -593,10 +593,10 @@ declare function startProxy(options: ProxyOptions): Promise<ProxyHandle>;
 declare const igniteProvider: ProviderPlugin;
 
 /**
- * BlockRun Model Definitions for OpenClaw
+ * IgniteRouter Model Definitions for OpenClaw
  *
- * Maps BlockRun's 55+ AI models to OpenClaw's ModelDefinitionConfig format.
- * All models use the "openai-completions" API since BlockRun is OpenAI-compatible.
+ * Maps IgniteRouter's 55+ AI models to OpenClaw's ModelDefinitionConfig format.
+ * All models use the "openai-completions" API since IgniteRouter is OpenAI-compatible.
  *
  * Pricing is in USD per 1M tokens. Operators pay these rates via x402;
  * they set their own markup when reselling to end users (Phase 2).
@@ -604,20 +604,20 @@ declare const igniteProvider: ProviderPlugin;
 
 /**
  * Model aliases for convenient shorthand access.
- * Users can type `/model claude` instead of `/model blockrun/anthropic/claude-sonnet-4-6`.
+ * Users can type `/model claude` instead of `/model igniterouter/anthropic/claude-sonnet-4-6`.
  */
 declare const MODEL_ALIASES: Record<string, string>;
 /**
  * Resolve a model alias to its full model ID.
- * Also strips "blockrun/" prefix for direct model paths.
+ * Also strips "IgniteRouter/" prefix for direct model paths.
  * Examples:
  *   - "claude" -> "anthropic/claude-sonnet-4-6" (alias)
- *   - "blockrun/claude" -> "anthropic/claude-sonnet-4-6" (alias with prefix)
- *   - "blockrun/anthropic/claude-sonnet-4-6" -> "anthropic/claude-sonnet-4-6" (prefix stripped)
+ *   - "IgniteRouter/claude" -> "anthropic/claude-sonnet-4-6" (alias with prefix)
+ *   - "IgniteRouter/anthropic/claude-sonnet-4-6" -> "anthropic/claude-sonnet-4-6" (prefix stripped)
  *   - "openai/gpt-4o" -> "openai/gpt-4o" (unchanged)
  */
 declare function resolveModelAlias(model: string): string;
-type BlockRunModel = {
+type IgniteRouterModel = {
     id: string;
     name: string;
     /** Model version (e.g., "4.6", "3.1", "5.2") for tracking updates */
@@ -651,13 +651,13 @@ type BlockRunModel = {
         endDate: string;
     };
 };
-declare const BLOCKRUN_MODELS: BlockRunModel[];
+declare const IgniteRouter_MODELS: IgniteRouterModel[];
 /**
- * All BlockRun models in OpenClaw format (including aliases).
+ * All IgniteRouter models in OpenClaw format (including aliases).
  */
 declare const OPENCLAW_MODELS: ModelDefinitionConfig[];
 /**
- * Build a ModelProviderConfig for BlockRun.
+ * Build a ModelProviderConfig for IgniteRouter.
  *
  * @param baseUrl - The proxy's local base URL (e.g., "http://127.0.0.1:12345")
  */
@@ -678,16 +678,8 @@ declare function getAgenticModels(): string[];
  */
 declare function getModelContextWindow(modelId: string): number | undefined;
 
-/**
- * Usage Logger
- *
- * Logs every LLM request as a JSON line to a daily log file.
- * Files: ~/.openclaw/blockrun/logs/usage-YYYY-MM-DD.jsonl
- *
- * MVP: append-only JSON lines. No rotation, no cleanup.
- * Logging never breaks the request flow — all errors are swallowed.
- */
-type UsageEntry = {
+declare function logUsage(entry: any): Promise<void>;
+interface UsageEntry {
     timestamp: string;
     model: string;
     tier: string;
@@ -695,21 +687,13 @@ type UsageEntry = {
     baselineCost: number;
     savings: number;
     latencyMs: number;
-    /** Whether the request completed successfully or ended in an error */
-    status?: "success" | "error";
-    /** Input (prompt) tokens reported by the provider */
+    status?: string;
     inputTokens?: number;
-    /** Output (completion) tokens reported by the provider */
     outputTokens?: number;
-    /** Partner service ID (e.g., "x_users_lookup") — only set for partner API calls */
     partnerId?: string;
-    /** Partner service name (e.g., "AttentionVC") — only set for partner API calls */
     service?: string;
-};
-/**
- * Log a usage entry as a JSON line.
- */
-declare function logUsage(entry: UsageEntry): Promise<void>;
+    [key: string]: unknown;
+}
 
 /**
  * Request Deduplication
@@ -746,7 +730,7 @@ declare class RequestDeduplicator {
 }
 
 /**
- * Retry Logic for ClawRouter
+ * Retry Logic for IgniteRouter
  *
  * Provides fetch wrapper with exponential backoff for transient errors.
  * Retries on 429 (rate limit), 502, 503, 504 (server errors).
@@ -828,7 +812,7 @@ declare function clearStats(): Promise<{
 /**
  * Partner Service Registry
  *
- * Defines available partner APIs that can be called through ClawRouter's proxy.
+ * Defines available partner APIs that can be called through IgniteRouter's proxy.
  * Partners provide specialized data (Twitter/X, etc.) via x402 micropayments.
  * The same wallet used for LLM calls pays for partner API calls — zero extra setup.
  */
@@ -839,7 +823,7 @@ type PartnerServiceParam = {
     required: boolean;
 };
 type PartnerServiceDefinition = {
-    /** Unique service ID used in tool names: blockrun_{id} */
+    /** Unique service ID used in tool names: IgniteRouter_{id} */
     id: string;
     /** Human-readable name */
     name: string;
@@ -919,4 +903,4 @@ declare function buildPartnerTools(proxyBaseUrl: string): PartnerToolDefinition[
 
 declare const plugin: OpenClawPluginDefinition;
 
-export { type AggregatedStats, BLOCKRUN_MODELS, type CachedLLMResponse, type CachedResponse, DEFAULT_RETRY_CONFIG, DEFAULT_ROUTING_CONFIG, DEFAULT_SESSION_CONFIG, type DailyStats, MODEL_ALIASES, OPENCLAW_MODELS, PARTNER_SERVICES, type PartnerServiceDefinition, type PartnerToolDefinition, type ProxyHandle, type ProxyOptions, RequestDeduplicator, ResponseCache, type ResponseCacheConfig, type RetryConfig, type RoutingConfig, type RoutingDecision, type SessionConfig, type SessionEntry, SessionStore, type Tier, type UsageEntry, buildPartnerTools, buildProviderModels, calculateModelCost, clearStats, plugin as default, fetchWithRetry, formatStatsAscii, getAgenticModels, getFallbackChain, getFallbackChainFiltered, getModelContextWindow, getPartnerService, getProxyPort, getSessionId, getStats, hashRequestContent, igniteProvider, isAgenticModel, isRetryable, loadProviders, logUsage, resolveModelAlias, route, startProxy };
+export { type AggregatedStats, type CachedLLMResponse, type CachedResponse, DEFAULT_RETRY_CONFIG, DEFAULT_ROUTING_CONFIG, DEFAULT_SESSION_CONFIG, type DailyStats, IgniteRouter_MODELS, MODEL_ALIASES, OPENCLAW_MODELS, PARTNER_SERVICES, type PartnerServiceDefinition, type PartnerToolDefinition, type ProxyHandle, type ProxyOptions, RequestDeduplicator, ResponseCache, type ResponseCacheConfig, type RetryConfig, type RoutingConfig, type RoutingDecision, type SessionConfig, type SessionEntry, SessionStore, type Tier, type UsageEntry, buildPartnerTools, buildProviderModels, calculateModelCost, clearStats, plugin as default, fetchWithRetry, formatStatsAscii, getAgenticModels, getFallbackChain, getFallbackChainFiltered, getModelContextWindow, getPartnerService, getProxyPort, getSessionId, getStats, hashRequestContent, igniteProvider, isAgenticModel, isRetryable, loadProviders, logUsage, resolveModelAlias, route, startProxy };

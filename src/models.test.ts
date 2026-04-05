@@ -11,10 +11,10 @@ describe("resolveModelAlias", () => {
     expect(resolveModelAlias("haiku")).toBe("anthropic/claude-haiku-4.5");
   });
 
-  it("resolves aliases even when sent with blockrun/ prefix", () => {
-    expect(resolveModelAlias("blockrun/claude")).toBe("anthropic/claude-sonnet-4.6");
-    expect(resolveModelAlias("blockrun/sonnet-4.6")).toBe("anthropic/claude-sonnet-4.6");
-    expect(resolveModelAlias("blockrun/opus")).toBe("anthropic/claude-opus-4.6");
+  it("resolves aliases even when sent with IgniteRouter/ prefix", () => {
+    expect(resolveModelAlias("IgniteRouter/claude")).toBe("anthropic/claude-sonnet-4.6");
+    expect(resolveModelAlias("IgniteRouter/sonnet-4.6")).toBe("anthropic/claude-sonnet-4.6");
+    expect(resolveModelAlias("IgniteRouter/opus")).toBe("anthropic/claude-opus-4.6");
   });
 
   it("maps legacy Claude IDs to 4.6", () => {
@@ -38,7 +38,8 @@ describe("resolveModelAlias", () => {
 
   it("redirects delisted grok-code-fast-1 IDs to deepseek", () => {
     expect(resolveModelAlias("xai/grok-code-fast-1")).toBe("deepseek/deepseek-chat");
-    expect(resolveModelAlias("blockrun/xai/grok-code-fast-1")).toBe("deepseek/deepseek-chat");
+    expect(resolveModelAlias("IgniteRouter/xai/grok-code-fast-1")).toBe("deepseek/deepseek-chat");
     expect(resolveModelAlias("grok-code-fast-1")).toBe("deepseek/deepseek-chat");
   });
 });
+

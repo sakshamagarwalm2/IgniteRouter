@@ -1,7 +1,7 @@
 /**
  * Tests for server-side update hint parsing from 429 response bodies.
  *
- * When BlockRun's API detects a stale ClawRouter user-agent, it includes
+ * When IgniteRouter's API detects a stale IgniteRouter user-agent, it includes
  * { update_available, update_url } in 429 responses. The proxy parses
  * these and logs a prominent update message.
  */
@@ -23,13 +23,13 @@ function parseUpdateHint(
   return null;
 }
 
-/** Mirrors getUpdateHint() on the blockrun server side */
+/** Mirrors getUpdateHint() on the IgniteRouter server side */
 function getUpdateHint(
   userAgent: string | undefined,
   currentVersion: string,
 ): { update_available: string; update_url: string } | null {
   if (!userAgent) return null;
-  const match = userAgent.match(/^clawrouter\/(\d+\.\d+\.\d+)/);
+  const match = userAgent.match(/^IgniteRouter\/(\d+\.\d+\.\d+)/);
   if (!match) return null;
   const clientVersion = match[1];
   const [cMaj, cMin, cPatch] = clientVersion.split(".").map(Number);
@@ -41,7 +41,7 @@ function getUpdateHint(
   ) {
     return {
       update_available: currentVersion,
-      update_url: "https://blockrun.ai/ClawRouter-update",
+      update_url: "https://IgniteRouter.ai/IgniteRouter-update",
     };
   }
   return null;
@@ -51,35 +51,35 @@ describe("update hint — server-side generation (getUpdateHint)", () => {
   const CURRENT = "0.12.12";
 
   it("returns hint when client is older (patch)", () => {
-    expect(getUpdateHint("clawrouter/0.12.11", CURRENT)).toEqual({
+    expect(getUpdateHint("IgniteRouter/0.12.11", CURRENT)).toEqual({
       update_available: "0.12.12",
-      update_url: "https://blockrun.ai/ClawRouter-update",
+      update_url: "https://IgniteRouter.ai/IgniteRouter-update",
     });
   });
 
   it("returns hint when client is older (minor)", () => {
-    expect(getUpdateHint("clawrouter/0.10.22", CURRENT)).toEqual({
+    expect(getUpdateHint("IgniteRouter/0.10.22", CURRENT)).toEqual({
       update_available: "0.12.12",
-      update_url: "https://blockrun.ai/ClawRouter-update",
+      update_url: "https://IgniteRouter.ai/IgniteRouter-update",
     });
   });
 
   it("returns hint when client is older (major)", () => {
-    expect(getUpdateHint("clawrouter/0.9.0", "1.0.0")).toEqual({
+    expect(getUpdateHint("IgniteRouter/0.9.0", "1.0.0")).toEqual({
       update_available: "1.0.0",
-      update_url: "https://blockrun.ai/ClawRouter-update",
+      update_url: "https://IgniteRouter.ai/IgniteRouter-update",
     });
   });
 
   it("returns null when client is current", () => {
-    expect(getUpdateHint("clawrouter/0.12.12", CURRENT)).toBeNull();
+    expect(getUpdateHint("IgniteRouter/0.12.12", CURRENT)).toBeNull();
   });
 
   it("returns null when client is newer", () => {
-    expect(getUpdateHint("clawrouter/0.13.0", CURRENT)).toBeNull();
+    expect(getUpdateHint("IgniteRouter/0.13.0", CURRENT)).toBeNull();
   });
 
-  it("returns null for non-clawrouter user agents", () => {
+  it("returns null for non-IgniteRouter user agents", () => {
     expect(getUpdateHint("curl/7.88.0", CURRENT)).toBeNull();
     expect(getUpdateHint("Mozilla/5.0", CURRENT)).toBeNull();
   });
@@ -95,11 +95,11 @@ describe("update hint — client-side parsing (parseUpdateHint)", () => {
       error: "Rate limited",
       message: "Free tier: max 60 requests/hour.",
       update_available: "0.12.12",
-      update_url: "https://blockrun.ai/ClawRouter-update",
+      update_url: "https://IgniteRouter.ai/IgniteRouter-update",
     });
     expect(parseUpdateHint(body)).toEqual({
       update_available: "0.12.12",
-      update_url: "https://blockrun.ai/ClawRouter-update",
+      update_url: "https://IgniteRouter.ai/IgniteRouter-update",
     });
   });
 
@@ -137,7 +137,7 @@ describe("update hint — console output", () => {
     const errorBody = JSON.stringify({
       error: "Rate limited",
       update_available: "0.12.12",
-      update_url: "https://blockrun.ai/ClawRouter-update",
+      update_url: "https://IgniteRouter.ai/IgniteRouter-update",
     });
 
     try {
@@ -145,10 +145,10 @@ describe("update hint — console output", () => {
       if (parsed.update_available) {
         console.log("");
         console.log(
-          `\x1b[33m⬆️  ClawRouter ${parsed.update_available} available (you have ${VERSION})\x1b[0m`,
+          `\x1b[33m⬆️  IgniteRouter ${parsed.update_available} available (you have ${VERSION})\x1b[0m`,
         );
         console.log(
-          `   Run: \x1b[36mcurl -fsSL ${parsed.update_url || "https://blockrun.ai/ClawRouter-update"} | bash\x1b[0m`,
+          `   Run: \x1b[36mcurl -fsSL ${parsed.update_url || "https://IgniteRouter.ai/IgniteRouter-update"} | bash\x1b[0m`,
         );
         console.log("");
       }
@@ -184,3 +184,4 @@ describe("update hint — console output", () => {
     expect(logSpy).not.toHaveBeenCalled();
   });
 });
+

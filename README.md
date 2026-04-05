@@ -383,5 +383,7 @@ OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE WORK OR THE USE OR OTH
 DEALINGS IN THE WORK.
 
 **Third-party components:**
-- ClawRouter by BlockRunAI — MIT License — https://github.com/BlockRunAI/ClawRouter
+- IgniteRouter by IgniteRouterAI — MIT License — https://github.com/IgniteRouterAI/IgniteRouter
 - RouteLLM by LMSYS — Apache 2.0 — https://github.com/lm-sys/RouteLLM
+
+

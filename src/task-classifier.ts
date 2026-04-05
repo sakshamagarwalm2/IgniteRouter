@@ -133,77 +133,89 @@ const AGENTIC_PATTERNS = [
   /summarize.*results|summary.*of.*findings/,
 ];
 
+import { routingLog } from "./logger.js";
+
 export function classifyTask(
   messages: Array<{ role: string; content: unknown }>,
   tools?: unknown[],
   estimatedTokens?: number,
 ): ClassificationResult {
-  if (hasImageInMessages(messages)) {
+  const result = ((): ClassificationResult => {
+    if (hasImageInMessages(messages)) {
+      return {
+        taskType: TaskType.Vision,
+        confidence: "signal",
+        reason: "image detected in content",
+      };
+    }
+
+    const hasTools = Array.isArray(tools) && tools.length > 0;
+    const lastUserMsg = getLastUserMessage(messages);
+
+    if (hasTools) {
+      return {
+        taskType: TaskType.Agentic,
+        confidence: "signal",
+        reason: "tools array present",
+      };
+    }
+
+    const agenticMatch = findMatchingPattern(lastUserMsg, AGENTIC_PATTERNS);
+    if (agenticMatch) {
+      return {
+        taskType: TaskType.Agentic,
+        confidence: "keyword",
+        reason: `keyword: ${agenticMatch}`,
+      };
+    }
+
+    if (estimatedTokens !== undefined && estimatedTokens > 8000) {
+      return {
+        taskType: TaskType.Deep,
+        confidence: "signal",
+        reason: `token count ${estimatedTokens} > 8000`,
+      };
+    }
+
+    const deepMatch = findMatchingPattern(lastUserMsg, DEEP_PATTERNS);
+    if (deepMatch) {
+      return {
+        taskType: TaskType.Deep,
+        confidence: "keyword",
+        reason: `keyword: ${deepMatch}`,
+      };
+    }
+
+    const reasoningMatch = findMatchingPattern(lastUserMsg, REASONING_PATTERNS);
+    if (reasoningMatch) {
+      return {
+        taskType: TaskType.Reasoning,
+        confidence: "keyword",
+        reason: `keyword: ${reasoningMatch}`,
+      };
+    }
+
+    const creativeMatch = findMatchingPattern(lastUserMsg, CREATIVE_PATTERNS);
+    if (creativeMatch) {
+      return {
+        taskType: TaskType.Creative,
+        confidence: "keyword",
+        reason: `keyword: ${creativeMatch}`,
+      };
+    }
+
     return {
-      taskType: TaskType.Vision,
-      confidence: "signal",
-      reason: "image detected in content",
+      taskType: TaskType.Chat,
+      confidence: "default",
+      reason: "default fallback",
     };
-  }
+  })();
 
-  const hasTools = Array.isArray(tools) && tools.length > 0;
-  const lastUserMsg = getLastUserMessage(messages);
-
-  if (hasTools) {
-    return {
-      taskType: TaskType.Agentic,
-      confidence: "signal",
-      reason: "tools array present",
-    };
-  }
-
-  const agenticMatch = findMatchingPattern(lastUserMsg, AGENTIC_PATTERNS);
-  if (agenticMatch) {
-    return {
-      taskType: TaskType.Agentic,
-      confidence: "keyword",
-      reason: `keyword: ${agenticMatch}`,
-    };
-  }
-
-  if (estimatedTokens !== undefined && estimatedTokens > 8000) {
-    return {
-      taskType: TaskType.Deep,
-      confidence: "signal",
-      reason: `token count ${estimatedTokens} > 8000`,
-    };
-  }
-
-  const deepMatch = findMatchingPattern(lastUserMsg, DEEP_PATTERNS);
-  if (deepMatch) {
-    return {
-      taskType: TaskType.Deep,
-      confidence: "keyword",
-      reason: `keyword: ${deepMatch}`,
-    };
-  }
-
-  const reasoningMatch = findMatchingPattern(lastUserMsg, REASONING_PATTERNS);
-  if (reasoningMatch) {
-    return {
-      taskType: TaskType.Reasoning,
-      confidence: "keyword",
-      reason: `keyword: ${reasoningMatch}`,
-    };
-  }
-
-  const creativeMatch = findMatchingPattern(lastUserMsg, CREATIVE_PATTERNS);
-  if (creativeMatch) {
-    return {
-      taskType: TaskType.Creative,
-      confidence: "keyword",
-      reason: `keyword: ${creativeMatch}`,
-    };
-  }
-
-  return {
-    taskType: TaskType.Chat,
-    confidence: "default",
-    reason: "default fallback",
-  };
+  routingLog.debug("Task classification result", { 
+    taskType: result.taskType, 
+    confidence: result.confidence, 
+    reason: result.reason 
+  });
+  
+  return result;
 }

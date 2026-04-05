@@ -10,7 +10,7 @@ import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { resolveModelAlias } from "./models.js";
 
-const DEFAULT_FILE_PATH = join(homedir(), ".openclaw", "blockrun", "exclude-models.json");
+const DEFAULT_FILE_PATH = join(homedir(), ".openclaw", "IgniteRouter", "exclude-models.json");
 
 /**
  * Load the exclude list from disk.
@@ -73,3 +73,4 @@ export function removeExclusion(model: string, filePath: string = DEFAULT_FILE_P
 export function clearExclusions(filePath: string = DEFAULT_FILE_PATH): void {
   saveExcludeList(new Set(), filePath);
 }
+

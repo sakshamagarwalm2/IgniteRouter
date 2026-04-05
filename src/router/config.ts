@@ -1090,7 +1090,7 @@ export const DEFAULT_ROUTING_CONFIG: RoutingConfig = {
     },
   },
 
-  // Eco tier configs - absolute cheapest (blockrun/eco)
+  // Eco tier configs - absolute cheapest (IgniteRouter/eco)
   ecoTiers: {
     SIMPLE: {
       primary: "free/gpt-oss-120b", // FREE! $0.00/$0.00
@@ -1126,7 +1126,7 @@ export const DEFAULT_ROUTING_CONFIG: RoutingConfig = {
     },
   },
 
-  // Premium tier configs - best quality (blockrun/premium)
+  // Premium tier configs - best quality (IgniteRouter/premium)
   // codex=complex coding, kimi=simple coding, sonnet=reasoning/instructions, opus=architecture/PM/audits
   premiumTiers: {
     SIMPLE: {
@@ -1229,3 +1229,4 @@ export const DEFAULT_ROUTING_CONFIG: RoutingConfig = {
     agenticMode: false,
   },
 };
+

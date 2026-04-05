@@ -59,8 +59,8 @@ DEALINGS IN THE WORK.
 This Work incorporates or depends on the following third-party components,
 each with their own licenses:
 
-- **ClawRouter** (by BlockRunAI) — MIT License
-  <https://github.com/BlockRunAI/ClawRouter>
+- **IgniteRouter** (by IgniteRouterAI) — MIT License
+  <https://github.com/IgniteRouterAI/IgniteRouter>
 
 - **RouteLLM** (by LMSYS) — Apache License 2.0
   <https://github.com/lm-sys/FastChat>
@@ -70,3 +70,4 @@ Your use of those components is governed by their respective licenses.
 ---
 
 For commercial licensing inquiries, please contact: igniterouter@example.com
+

@@ -1,4 +1,5 @@
 import { TaskType } from "./task-classifier.js";
+import { configLog } from "./logger.js";
 import { ComplexityTier } from "./complexity-scorer.js";
 
 export interface UserProvider {
@@ -226,6 +227,13 @@ function mergeProvider(id: string, provided: Partial<UserProvider>): UserProvide
   }
 
   const knownDefaults = KNOWN_MODELS.get(id);
+  if (knownDefaults) {
+    configLog.debug("Provider metadata from registry", { 
+      id, 
+      contextWindow: knownDefaults.contextWindow, 
+      inputPrice: knownDefaults.inputPricePerMToken 
+    });
+  }
 
   return {
     ...baseDefaults,
@@ -266,10 +274,11 @@ export function loadProviders(rawConfig: unknown): IgniteConfig {
         const merged = mergeProvider(prov.id, prov as Partial<UserProvider>);
         providers.push(merged);
       } catch (err) {
-        console.warn(`[IgniteRouter] Failed to load provider "${prov.id}":`, err);
+        configLog.warn("Skipping invalid provider", { id: prov.id, reason: err instanceof Error ? err.message : String(err) });
       }
     }
   }
 
+  configLog.info("Providers loaded", { count: providers.length, priority: defaultPriority });
   return { defaultPriority, providers };
 }

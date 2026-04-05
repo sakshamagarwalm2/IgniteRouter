@@ -7,13 +7,13 @@
  *
  * Usage:
  *   # Quick 5-minute test
- *   BLOCKRUN_WALLET_KEY=0x... DURATION_MINUTES=5 tsx test/resilience-stability.ts
+ *   IgniteRouter_WALLET_KEY=0x... DURATION_MINUTES=5 tsx test/resilience-stability.ts
  *
  *   # Full 4-hour production test
- *   BLOCKRUN_WALLET_KEY=0x... DURATION_MINUTES=240 tsx test/resilience-stability.ts
+ *   IgniteRouter_WALLET_KEY=0x... DURATION_MINUTES=240 tsx test/resilience-stability.ts
  *
  *   # Memory leak test with GC
- *   BLOCKRUN_WALLET_KEY=0x... node --expose-gc -r tsx/cjs test/resilience-stability.ts
+ *   IgniteRouter_WALLET_KEY=0x... node --expose-gc -r tsx/cjs test/resilience-stability.ts
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -34,10 +34,10 @@ type TestContext = {
 };
 
 /**
- * Setup test environment with mock BlockRun API server and proxy.
+ * Setup test environment with mock IgniteRouter API server and proxy.
  */
 async function setupTestEnvironment(): Promise<TestContext> {
-  // Create mock BlockRun API server
+  // Create mock IgniteRouter API server
   const mockServer = createServer((req: IncomingMessage, res: ServerResponse) => {
     if (req.url === "/v1/chat/completions" && req.method === "POST") {
       let body = "";
@@ -255,7 +255,7 @@ async function testMemoryLeaks(ctx: TestContext): Promise<void> {
 
 async function main() {
   console.log("\n╔════════════════════════════════════════════════════════════════╗");
-  console.log("║       ClawRouter Resilience Long-Running Stability Tests       ║");
+  console.log("║       IgniteRouter Resilience Long-Running Stability Tests       ║");
   console.log("╚════════════════════════════════════════════════════════════════╝");
 
   const durationMinutes = parseInt(process.env.DURATION_MINUTES || "5", 10);
@@ -289,3 +289,4 @@ main().catch((err) => {
   console.error("\n✗ Stability test failed:", err);
   process.exit(1);
 });
+

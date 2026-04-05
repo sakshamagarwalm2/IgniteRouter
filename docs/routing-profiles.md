@@ -1,10 +1,10 @@
 # Routing Profiles & Pricing
 
-ClawRouter offers four routing profiles to balance cost vs quality. Prices are in **$/M tokens** (input/output).
+IgniteRouter offers four routing profiles to balance cost vs quality. Prices are in **$/M tokens** (input/output).
 
 ## ECO (Absolute Cheapest)
 
-Use `blockrun/eco` for maximum cost savings.
+Use `IgniteRouter/eco` for maximum cost savings.
 
 | Tier      | Primary Model                | Input | Output |
 | --------- | ---------------------------- | ----- | ------ |
@@ -17,7 +17,7 @@ Use `blockrun/eco` for maximum cost savings.
 
 ## AUTO (Balanced - Default)
 
-Use `blockrun/auto` for the best quality/price balance.
+Use `igniterouter/auto` for the best quality/price balance.
 
 | Tier      | Primary Model               | Input | Output |
 | --------- | --------------------------- | ----- | ------ |
@@ -30,7 +30,7 @@ Use `blockrun/auto` for the best quality/price balance.
 
 ## PREMIUM (Best Quality)
 
-Use `blockrun/premium` for maximum quality.
+Use `IgniteRouter/premium` for maximum quality.
 
 | Tier      | Primary Model        | Input | Output |
 | --------- | -------------------- | ----- | ------ |
@@ -43,7 +43,7 @@ Use `blockrun/premium` for maximum quality.
 
 ## AGENTIC (Multi-Step Tasks)
 
-Use `blockrun/agentic` for autonomous multi-step tasks, or let ClawRouter auto-detect agentic patterns.
+Use `IgniteRouter/agentic` for autonomous multi-step tasks, or let IgniteRouter auto-detect agentic patterns.
 
 | Tier      | Primary Model        | Input | Output |
 | --------- | -------------------- | ----- | ------ |
@@ -67,7 +67,7 @@ Use `blockrun/agentic` for autonomous multi-step tasks, or let ClawRouter auto-d
 
 ## How Tiers Work
 
-ClawRouter automatically classifies your query into one of four tiers:
+IgniteRouter automatically classifies your query into one of four tiers:
 
 - **SIMPLE**: Basic questions, short responses, simple lookups
 - **MEDIUM**: Code generation, moderate complexity tasks
@@ -79,3 +79,4 @@ The router picks the cheapest model capable of handling your query's tier.
 ---
 
 _Last updated: v0.12.24_
+

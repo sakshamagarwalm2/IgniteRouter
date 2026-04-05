@@ -3,12 +3,12 @@ import { describe, expect, it } from "vitest";
 import { debrandSystemMessages } from "./proxy.js";
 
 describe("debrandSystemMessages", () => {
-  it("replaces blockrun/auto with the resolved model in system messages", () => {
+  it("replaces igniterouter/auto with the resolved model in system messages", () => {
     const messages = [
       {
         role: "system",
         content:
-          "You are a personal assistant.\n\n## Runtime\nRuntime: model=blockrun/auto | default_model=blockrun/auto",
+          "You are a personal assistant.\n\n## Runtime\nRuntime: model=igniterouter/auto | default_model=igniterouter/auto",
       },
       { role: "user", content: "Hello" },
     ];
@@ -22,11 +22,11 @@ describe("debrandSystemMessages", () => {
     expect(result[1].content).toBe("Hello");
   });
 
-  it("replaces blockrun/eco and blockrun/premium profiles", () => {
+  it("replaces IgniteRouter/eco and IgniteRouter/premium profiles", () => {
     const messages = [
       {
         role: "system",
-        content: "model=blockrun/eco | default_model=blockrun/premium",
+        content: "model=IgniteRouter/eco | default_model=IgniteRouter/premium",
       },
     ];
 
@@ -37,11 +37,11 @@ describe("debrandSystemMessages", () => {
     );
   });
 
-  it("strips blockrun/ prefix from explicit model names", () => {
+  it("strips IgniteRouter/ prefix from explicit model names", () => {
     const messages = [
       {
         role: "system",
-        content: "model=blockrun/openai/gpt-4o | default_model=blockrun/auto",
+        content: "model=IgniteRouter/openai/gpt-4o | default_model=igniterouter/auto",
       },
     ];
 
@@ -52,14 +52,14 @@ describe("debrandSystemMessages", () => {
 
   it("does not modify non-system messages", () => {
     const messages = [
-      { role: "user", content: "I use blockrun/auto for my tasks" },
-      { role: "assistant", content: "I'm Blockrun!" },
+      { role: "user", content: "I use igniterouter/auto for my tasks" },
+      { role: "assistant", content: "I'm IgniteRouter!" },
     ];
 
     const result = debrandSystemMessages(messages, "deepseek/deepseek-chat");
 
-    expect(result[0].content).toBe("I use blockrun/auto for my tasks");
-    expect(result[1].content).toBe("I'm Blockrun!");
+    expect(result[0].content).toBe("I use igniterouter/auto for my tasks");
+    expect(result[1].content).toBe("I'm IgniteRouter!");
   });
 
   it("returns same array reference when no changes needed", () => {
@@ -74,7 +74,7 @@ describe("debrandSystemMessages", () => {
   });
 
   it("handles non-string system content gracefully", () => {
-    const messages = [{ role: "system", content: [{ type: "text", text: "blockrun/auto" }] }];
+    const messages = [{ role: "system", content: [{ type: "text", text: "igniterouter/auto" }] }];
 
     const result = debrandSystemMessages(messages, "deepseek/deepseek-chat");
 
@@ -82,16 +82,16 @@ describe("debrandSystemMessages", () => {
     expect(result).toBe(messages);
   });
 
-  it("is case-insensitive for blockrun prefix", () => {
-    const messages = [{ role: "system", content: "model=Blockrun/Auto" }];
+  it("is case-insensitive for IgniteRouter prefix", () => {
+    const messages = [{ role: "system", content: "model=igniterouter/auto" }];
 
     const result = debrandSystemMessages(messages, "deepseek/deepseek-chat");
 
     expect(result[0].content).toBe("model=deepseek/deepseek-chat");
   });
 
-  it("replaces blockrun/free profile", () => {
-    const messages = [{ role: "system", content: "default_model=blockrun/free" }];
+  it("replaces IgniteRouter/free profile", () => {
+    const messages = [{ role: "system", content: "default_model=IgniteRouter/free" }];
 
     const result = debrandSystemMessages(messages, "nvidia/gpt-oss-120b");
 
@@ -100,12 +100,12 @@ describe("debrandSystemMessages", () => {
 
   it("handles realistic OpenClaw system prompt with SOUL.md", () => {
     // This simulates the actual system prompt OpenClaw generates,
-    // which caused the model to say "I'm Blockrun" (issue #99)
+    // which caused the model to say "I'm IgniteRouter" (issue #99)
     const systemContent = [
       "You are a personal assistant running inside OpenClaw.",
       "",
       "## Runtime",
-      "Runtime: agent=main | host=openclaw | os=Darwin 25.3.0 (arm64) | node=v22.14.0 | model=blockrun/auto | default_model=blockrun/auto | channel=control-ui | thinking=off",
+      "Runtime: agent=main | host=openclaw | os=Darwin 25.3.0 (arm64) | node=v22.14.0 | model=igniterouter/auto | default_model=igniterouter/auto | channel=control-ui | thinking=off",
       "",
       "# Project Context",
       "",
@@ -122,8 +122,8 @@ describe("debrandSystemMessages", () => {
 
     const result = debrandSystemMessages(messages, "deepseek/deepseek-chat");
 
-    // "blockrun" should be completely gone from system prompt
-    expect(result[0].content).not.toContain("blockrun");
+    // "IgniteRouter" should be completely gone from system prompt
+    expect(result[0].content).not.toContain("IgniteRouter");
     // Resolved model should appear instead
     expect(result[0].content).toContain("model=deepseek/deepseek-chat");
     expect(result[0].content).toContain("default_model=deepseek/deepseek-chat");
@@ -132,3 +132,4 @@ describe("debrandSystemMessages", () => {
     expect(result[0].content).toContain("User = Fred");
   });
 });
+

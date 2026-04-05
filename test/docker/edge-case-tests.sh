@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# ClawRouter Edge Case Test Suite
+# IgniteRouter Edge Case Test Suite
 # Tests OpenClaw integration, model routing, error handling, and x402 flows
 
 set -e
@@ -16,8 +16,8 @@ PASSED=0
 FAILED=0
 SKIPPED=0
 
-CLAWROUTER_PORT=8402
-BLOCKRUN_API="https://api.blockrun.ai/v1"
+IgniteRouter_PORT=8402
+IgniteRouter_API="https://api.IgniteRouter.ai/v1"
 
 log_section() {
     echo ""
@@ -70,13 +70,13 @@ wait_for_port() {
 test_fresh_install() {
     log_test "1.1" "Fresh installation from npm"
 
-    npm install -g @blockrun/clawrouter 2>&1 | head -5
+    npm install -g @igniterouter/igniterouter 2>&1 | head -5
 
-    if command -v clawrouter &> /dev/null; then
-        log_pass "ClawRouter installed"
-        clawrouter --version
+    if command -v IgniteRouter &> /dev/null; then
+        log_pass "IgniteRouter installed"
+        IgniteRouter --version
     else
-        log_fail "ClawRouter not in PATH"
+        log_fail "IgniteRouter not in PATH"
         return 1
     fi
 }
@@ -84,7 +84,7 @@ test_fresh_install() {
 test_dist_files_exist() {
     log_test "1.2" "Verify dist/ files included in package"
 
-    PKG_DIR=$(npm root -g)/@blockrun/clawrouter
+    PKG_DIR=$(npm root -g)/@igniterouter/igniterouter
 
     local files=("dist/index.js" "dist/cli.js" "dist/index.d.ts")
     local all_exist=true
@@ -109,13 +109,13 @@ test_openclaw_plugin_install() {
     log_test "1.3" "OpenClaw plugin installation via reinstall script"
 
     # Run the reinstall script
-    bash $(npm root -g)/@blockrun/clawrouter/scripts/reinstall.sh 2>&1 || {
+    bash $(npm root -g)/@igniterouter/igniterouter/scripts/reinstall.sh 2>&1 || {
         log_fail "Reinstall script failed"
         return 1
     }
 
     # Verify extension installed
-    if [ -f "$HOME/.openclaw/extensions/clawrouter/dist/index.js" ]; then
+    if [ -f "$HOME/.openclaw/extensions/IgniteRouter/dist/index.js" ]; then
         log_pass "OpenClaw extension installed correctly"
     else
         log_fail "Extension dist/index.js missing"
@@ -147,14 +147,14 @@ test_model_alias_resolution() {
     log_pass "Alias mappings defined (runtime test requires proxy)"
 }
 
-test_blockrun_prefix_stripping() {
-    log_test "2.2" "blockrun/ prefix stripping"
+test_IgniteRouter_prefix_stripping() {
+    log_test "2.2" "IgniteRouter/ prefix stripping"
 
     # These models should all resolve correctly
     local models=(
-        "blockrun/anthropic/claude-sonnet-4.6"
-        "blockrun/openai/gpt-4o"
-        "blockrun/deepseek/deepseek-chat"
+        "IgniteRouter/anthropic/claude-sonnet-4.6"
+        "IgniteRouter/openai/gpt-4o"
+        "IgniteRouter/deepseek/deepseek-chat"
         "anthropic/claude-sonnet-4.6"
         "gpt-4o"
     )
@@ -171,7 +171,7 @@ test_invalid_model_handling() {
 
     # Test with clearly invalid model
     local response
-    response=$(curl -s -X POST "http://localhost:$CLAWROUTER_PORT/v1/chat/completions" \
+    response=$(curl -s -X POST "http://localhost:$IgniteRouter_PORT/v1/chat/completions" \
         -H "Content-Type: application/json" \
         -d '{"model":"invalid/nonexistent-model","messages":[{"role":"user","content":"test"}]}' 2>/dev/null || echo '{"error":"proxy_not_running"}')
 
@@ -187,18 +187,18 @@ test_invalid_model_handling() {
 # ═══════════════════════════════════════════════════════════════
 
 test_proxy_startup() {
-    log_test "3.1" "Proxy startup on port $CLAWROUTER_PORT"
+    log_test "3.1" "Proxy startup on port $IgniteRouter_PORT"
 
     # Kill any existing proxy
-    lsof -ti :$CLAWROUTER_PORT | xargs kill -9 2>/dev/null || true
+    lsof -ti :$IgniteRouter_PORT | xargs kill -9 2>/dev/null || true
     sleep 1
 
     # Start proxy in background
-    BLOCKRUN_WALLET_KEY="0x$(openssl rand -hex 32)" clawrouter &
+    IgniteRouter_WALLET_KEY="0x$(openssl rand -hex 32)" IgniteRouter &
     PROXY_PID=$!
 
-    if wait_for_port $CLAWROUTER_PORT 10; then
-        log_pass "Proxy started on port $CLAWROUTER_PORT (PID: $PROXY_PID)"
+    if wait_for_port $IgniteRouter_PORT 10; then
+        log_pass "Proxy started on port $IgniteRouter_PORT (PID: $PROXY_PID)"
     else
         log_fail "Proxy failed to start within 10s"
         kill $PROXY_PID 2>/dev/null || true
@@ -210,7 +210,7 @@ test_proxy_health_check() {
     log_test "3.2" "Proxy health check endpoint"
 
     local response
-    response=$(curl -s "http://localhost:$CLAWROUTER_PORT/health" 2>/dev/null || echo "failed")
+    response=$(curl -s "http://localhost:$IgniteRouter_PORT/health" 2>/dev/null || echo "failed")
 
     if [ "$response" != "failed" ]; then
         log_pass "Health endpoint responding"
@@ -224,7 +224,7 @@ test_proxy_models_endpoint() {
     log_test "3.3" "Proxy /v1/models endpoint"
 
     local response
-    response=$(curl -s "http://localhost:$CLAWROUTER_PORT/v1/models" 2>/dev/null || echo '{"error":"failed"}')
+    response=$(curl -s "http://localhost:$IgniteRouter_PORT/v1/models" 2>/dev/null || echo '{"error":"failed"}')
 
     if echo "$response" | jq -e '.data' &>/dev/null; then
         local count=$(echo "$response" | jq '.data | length')
@@ -237,13 +237,13 @@ test_proxy_models_endpoint() {
 test_proxy_graceful_shutdown() {
     log_test "3.4" "Proxy graceful shutdown"
 
-    local pid=$(lsof -ti :$CLAWROUTER_PORT 2>/dev/null || echo "")
+    local pid=$(lsof -ti :$IgniteRouter_PORT 2>/dev/null || echo "")
 
     if [ -n "$pid" ]; then
         kill $pid 2>/dev/null
         sleep 2
 
-        if ! nc -z localhost $CLAWROUTER_PORT 2>/dev/null; then
+        if ! nc -z localhost $IgniteRouter_PORT 2>/dev/null; then
             log_pass "Proxy shut down gracefully"
         else
             log_fail "Proxy still running after SIGTERM"
@@ -258,12 +258,12 @@ test_port_conflict_handling() {
     log_test "3.5" "Port conflict handling"
 
     # Start a dummy server on the port
-    nc -l -p $CLAWROUTER_PORT &
+    nc -l -p $IgniteRouter_PORT &
     NC_PID=$!
     sleep 1
 
-    # Try to start clawrouter (should fail or use different port)
-    BLOCKRUN_WALLET_KEY="0x$(openssl rand -hex 32)" timeout 5 clawrouter 2>&1 | head -3 || true
+    # Try to start IgniteRouter (should fail or use different port)
+    IgniteRouter_WALLET_KEY="0x$(openssl rand -hex 32)" timeout 5 IgniteRouter 2>&1 | head -3 || true
 
     kill $NC_PID 2>/dev/null || true
     log_pass "Port conflict handled without crash"
@@ -277,14 +277,14 @@ test_wallet_generation() {
     log_test "4.1" "Auto wallet generation"
 
     # Remove any existing wallet
-    rm -f ~/.clawrouter/wallet.json 2>/dev/null || true
+    rm -f ~/.IgniteRouter/wallet.json 2>/dev/null || true
 
     # Start proxy briefly to generate wallet
-    BLOCKRUN_WALLET_KEY="" timeout 3 clawrouter 2>&1 | head -5 || true
+    IgniteRouter_WALLET_KEY="" timeout 3 IgniteRouter 2>&1 | head -5 || true
 
-    if [ -f ~/.clawrouter/wallet.json ]; then
+    if [ -f ~/.IgniteRouter/wallet.json ]; then
         log_pass "Wallet auto-generated"
-        jq -r '.address' ~/.clawrouter/wallet.json | head -1
+        jq -r '.address' ~/.IgniteRouter/wallet.json | head -1
     else
         log_info "Wallet stored in memory only (expected for ephemeral mode)"
         log_pass "Wallet generation handled"
@@ -301,20 +301,20 @@ test_wallet_persistence() {
         local key="$1"
         local pid response wallet
 
-        lsof -ti :$CLAWROUTER_PORT | xargs kill -9 2>/dev/null || true
+        lsof -ti :$IgniteRouter_PORT | xargs kill -9 2>/dev/null || true
         sleep 1
 
-        BLOCKRUN_WALLET_KEY="$key" clawrouter >/tmp/clawrouter-wallet-persistence.log 2>&1 &
+        IgniteRouter_WALLET_KEY="$key" IgniteRouter >/tmp/IgniteRouter-wallet-persistence.log 2>&1 &
         pid=$!
 
-        if ! wait_for_port $CLAWROUTER_PORT 10; then
+        if ! wait_for_port $IgniteRouter_PORT 10; then
             kill $pid 2>/dev/null || true
             wait $pid 2>/dev/null || true
             echo ""
             return 1
         fi
 
-        response=$(curl -s "http://localhost:$CLAWROUTER_PORT/health" 2>/dev/null || echo "")
+        response=$(curl -s "http://localhost:$IgniteRouter_PORT/health" 2>/dev/null || echo "")
         wallet=$(echo "$response" | jq -r '.wallet // empty' 2>/dev/null || echo "")
 
         kill $pid 2>/dev/null || true
@@ -342,16 +342,16 @@ test_insufficient_balance() {
     log_test "4.3" "Insufficient balance error handling"
 
     # Start proxy with empty wallet
-    lsof -ti :$CLAWROUTER_PORT | xargs kill -9 2>/dev/null || true
+    lsof -ti :$IgniteRouter_PORT | xargs kill -9 2>/dev/null || true
     sleep 1
 
-    BLOCKRUN_WALLET_KEY="0x$(openssl rand -hex 32)" clawrouter &
+    IgniteRouter_WALLET_KEY="0x$(openssl rand -hex 32)" IgniteRouter &
     PROXY_PID=$!
 
-    if wait_for_port $CLAWROUTER_PORT 10; then
+    if wait_for_port $IgniteRouter_PORT 10; then
         # Try a request (should fail with balance error)
         local response
-        response=$(curl -s -X POST "http://localhost:$CLAWROUTER_PORT/v1/chat/completions" \
+        response=$(curl -s -X POST "http://localhost:$IgniteRouter_PORT/v1/chat/completions" \
             -H "Content-Type: application/json" \
             -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"max_tokens":5}' 2>/dev/null || echo '{}')
 
@@ -382,16 +382,16 @@ test_network_timeout_handling() {
 test_malformed_request_handling() {
     log_test "5.2" "Malformed request handling"
 
-    lsof -ti :$CLAWROUTER_PORT | xargs kill -9 2>/dev/null || true
+    lsof -ti :$IgniteRouter_PORT | xargs kill -9 2>/dev/null || true
     sleep 1
 
-    BLOCKRUN_WALLET_KEY="0x$(openssl rand -hex 32)" clawrouter &
+    IgniteRouter_WALLET_KEY="0x$(openssl rand -hex 32)" IgniteRouter &
     PROXY_PID=$!
 
-    if wait_for_port $CLAWROUTER_PORT 10; then
+    if wait_for_port $IgniteRouter_PORT 10; then
         # Send malformed JSON
         local response
-        response=$(curl -s -X POST "http://localhost:$CLAWROUTER_PORT/v1/chat/completions" \
+        response=$(curl -s -X POST "http://localhost:$IgniteRouter_PORT/v1/chat/completions" \
             -H "Content-Type: application/json" \
             -d 'not valid json at all' 2>/dev/null || echo '{}')
 
@@ -410,15 +410,15 @@ test_malformed_request_handling() {
 test_empty_messages_array() {
     log_test "5.3" "Empty messages array handling"
 
-    lsof -ti :$CLAWROUTER_PORT | xargs kill -9 2>/dev/null || true
+    lsof -ti :$IgniteRouter_PORT | xargs kill -9 2>/dev/null || true
     sleep 1
 
-    BLOCKRUN_WALLET_KEY="0x$(openssl rand -hex 32)" clawrouter &
+    IgniteRouter_WALLET_KEY="0x$(openssl rand -hex 32)" IgniteRouter &
     PROXY_PID=$!
 
-    if wait_for_port $CLAWROUTER_PORT 10; then
+    if wait_for_port $IgniteRouter_PORT 10; then
         local response
-        response=$(curl -s -X POST "http://localhost:$CLAWROUTER_PORT/v1/chat/completions" \
+        response=$(curl -s -X POST "http://localhost:$IgniteRouter_PORT/v1/chat/completions" \
             -H "Content-Type: application/json" \
             -d '{"model":"gpt-4o-mini","messages":[]}' 2>/dev/null || echo '{}')
 
@@ -438,15 +438,15 @@ test_empty_messages_array() {
 test_missing_model_field() {
     log_test "5.4" "Missing model field handling"
 
-    lsof -ti :$CLAWROUTER_PORT | xargs kill -9 2>/dev/null || true
+    lsof -ti :$IgniteRouter_PORT | xargs kill -9 2>/dev/null || true
     sleep 1
 
-    BLOCKRUN_WALLET_KEY="0x$(openssl rand -hex 32)" clawrouter &
+    IgniteRouter_WALLET_KEY="0x$(openssl rand -hex 32)" IgniteRouter &
     PROXY_PID=$!
 
-    if wait_for_port $CLAWROUTER_PORT 10; then
+    if wait_for_port $IgniteRouter_PORT 10; then
         local response
-        response=$(curl -s -X POST "http://localhost:$CLAWROUTER_PORT/v1/chat/completions" \
+        response=$(curl -s -X POST "http://localhost:$IgniteRouter_PORT/v1/chat/completions" \
             -H "Content-Type: application/json" \
             -d '{"messages":[{"role":"user","content":"hi"}]}' 2>/dev/null || echo '{}')
 
@@ -473,10 +473,10 @@ test_openclaw_config_injection() {
     CONFIG_FILE="$HOME/.openclaw/openclaw.json"
 
     if [ -f "$CONFIG_FILE" ]; then
-        if jq -e '.models.providers.blockrun' "$CONFIG_FILE" &>/dev/null; then
-            log_pass "blockrun provider configured in openclaw.json"
+        if jq -e '.models.providers.IgniteRouter' "$CONFIG_FILE" &>/dev/null; then
+            log_pass "IgniteRouter provider configured in openclaw.json"
         else
-            log_fail "blockrun provider not found in config"
+            log_fail "IgniteRouter provider not found in config"
         fi
     else
         log_skip "openclaw.json not found"
@@ -489,10 +489,10 @@ test_openclaw_auth_profile() {
     AUTH_FILE="$HOME/.openclaw/agents/main/agent/auth-profiles.json"
 
     if [ -f "$AUTH_FILE" ]; then
-        if jq -e '.profiles["blockrun:default"]' "$AUTH_FILE" &>/dev/null; then
-            log_pass "blockrun:default auth profile exists"
+        if jq -e '.profiles["IgniteRouter:default"]' "$AUTH_FILE" &>/dev/null; then
+            log_pass "IgniteRouter:default auth profile exists"
         else
-            log_fail "blockrun:default profile not found"
+            log_fail "IgniteRouter:default profile not found"
         fi
     else
         log_skip "auth-profiles.json not found"
@@ -505,10 +505,10 @@ test_openclaw_plugins_allow() {
     CONFIG_FILE="$HOME/.openclaw/openclaw.json"
 
     if [ -f "$CONFIG_FILE" ]; then
-        if jq -e '.plugins.allow | index("clawrouter") or index("@blockrun/clawrouter")' "$CONFIG_FILE" &>/dev/null; then
-            log_pass "clawrouter in plugins.allow"
+        if jq -e '.plugins.allow | index("IgniteRouter") or index("@igniterouter/igniterouter")' "$CONFIG_FILE" &>/dev/null; then
+            log_pass "IgniteRouter in plugins.allow"
         else
-            log_fail "clawrouter not in plugins.allow"
+            log_fail "IgniteRouter not in plugins.allow"
         fi
     else
         log_skip "openclaw.json not found"
@@ -523,7 +523,7 @@ cleanup() {
     log_section "Cleanup"
 
     # Kill any running proxy
-    lsof -ti :$CLAWROUTER_PORT | xargs kill -9 2>/dev/null || true
+    lsof -ti :$IgniteRouter_PORT | xargs kill -9 2>/dev/null || true
 
     log_info "Cleanup complete"
 }
@@ -555,7 +555,7 @@ print_summary() {
 main() {
     echo ""
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║       ClawRouter Edge Case Test Suite v1.0                   ║${NC}"
+    echo -e "${CYAN}║       IgniteRouter Edge Case Test Suite v1.0                   ║${NC}"
     echo -e "${CYAN}║       OpenClaw + x402 Integration Testing                    ║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
@@ -569,7 +569,7 @@ main() {
 
     log_section "2. Model Routing Edge Cases"
     test_model_alias_resolution || true
-    test_blockrun_prefix_stripping || true
+    test_IgniteRouter_prefix_stripping || true
     test_invalid_model_handling || true
 
     log_section "3. Proxy Lifecycle Edge Cases"
@@ -599,3 +599,4 @@ main() {
 }
 
 main "$@"
+

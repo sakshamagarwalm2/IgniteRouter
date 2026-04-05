@@ -13,7 +13,7 @@
 
 const PROXY = "http://localhost:8402";
 // Use free model so test doesn't need a funded wallet
-const MODEL = "blockrun/eco";
+const MODEL = "IgniteRouter/eco";
 
 function log(msg) {
   console.log(`\x1b[36m[e2e]\x1b[0m ${msg}`);
@@ -157,3 +157,4 @@ try {
 }
 
 console.log("\n\x1b[32m✓ All 3 turns passed — multi-turn fix verified\x1b[0m");
+

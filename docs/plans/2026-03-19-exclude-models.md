@@ -4,9 +4,9 @@
 
 **Goal:** Let users exclude specific models from routing via `/exclude` Telegram command, persisted to disk.
 
-**Architecture:** New `exclude-models.json` file at `~/.openclaw/blockrun/` stores the exclusion list. A `filterByExcludeList()` function in `selector.ts` filters the fallback chain (same safety pattern as existing filters). The `/exclude` command manages the list via add/remove/clear subcommands. The proxy loads the list at startup and re-reads on each request (hot-reload).
+**Architecture:** New `exclude-models.json` file at `~/.openclaw/IgniteRouter/` stores the exclusion list. A `filterByExcludeList()` function in `selector.ts` filters the fallback chain (same safety pattern as existing filters). The `/exclude` command manages the list via add/remove/clear subcommands. The proxy loads the list at startup and re-reads on each request (hot-reload).
 
-**Tech Stack:** TypeScript, Node.js fs, existing ClawRouter command pattern
+**Tech Stack:** TypeScript, Node.js fs, existing IgniteRouter command pattern
 
 ---
 
@@ -32,7 +32,7 @@ import {
   clearExclusions,
 } from "./exclude-models.js";
 
-const TEST_DIR = join(tmpdir(), "clawrouter-test-exclude-" + Date.now());
+const TEST_DIR = join(tmpdir(), "IgniteRouter-test-exclude-" + Date.now());
 const TEST_FILE = join(TEST_DIR, "exclude-models.json");
 
 describe("exclude-models", () => {
@@ -100,7 +100,7 @@ Expected: FAIL — module `./exclude-models.js` does not exist
 /**
  * Exclude Models — persistent user-configurable model exclusion list.
  *
- * Stores excluded model IDs in ~/.openclaw/blockrun/exclude-models.json.
+ * Stores excluded model IDs in ~/.openclaw/IgniteRouter/exclude-models.json.
  * Models in this list are filtered out of routing fallback chains.
  */
 
@@ -109,7 +109,7 @@ import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { resolveModelAlias } from "./models.js";
 
-const DEFAULT_EXCLUDE_FILE = join(homedir(), ".openclaw", "blockrun", "exclude-models.json");
+const DEFAULT_EXCLUDE_FILE = join(homedir(), ".openclaw", "IgniteRouter", "exclude-models.json");
 
 /**
  * Load the exclude list from disk. Returns empty Set if file missing.
@@ -259,7 +259,7 @@ In `src/proxy.ts` at line ~1174, add to `ProxyOptions`:
   /**
    * Set of model IDs to exclude from routing.
    * Excluded models are filtered out of fallback chains.
-   * Loaded from ~/.openclaw/blockrun/exclude-models.json
+   * Loaded from ~/.openclaw/IgniteRouter/exclude-models.json
    */
   excludeModels?: Set<string>;
 ```
@@ -274,7 +274,7 @@ const excludeFiltered = filterByExcludeList(contextFiltered, options.excludeMode
 const excludeExcluded = contextFiltered.filter((m) => !excludeFiltered.includes(m));
 if (excludeExcluded.length > 0) {
   console.log(
-    `[ClawRouter] Exclude filter: excluded ${excludeExcluded.join(", ")} (user preference)`,
+    `[IgniteRouter] Exclude filter: excluded ${excludeExcluded.join(", ")} (user preference)`,
   );
 }
 ```
@@ -572,3 +572,4 @@ git commit -m "test: add exclude-models integration tests"
 | 3    | Wire into proxy fallback chain             | `src/proxy.ts`                           |
 | 4    | `/exclude` Telegram command                | `src/index.ts`                           |
 | 5    | Integration tests                          | `src/exclude-models.integration.test.ts` |
+

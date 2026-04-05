@@ -1,25 +1,25 @@
 /**
- * End-to-end test for ClawRouter proxy.
+ * End-to-end test for IgniteRouter proxy.
  *
- * Starts the local x402 proxy, sends a real request through it to BlockRun,
+ * Starts the local x402 proxy, sends a real request through it to IgniteRouter,
  * and verifies the full flow: routing → x402 payment → LLM response.
  *
  * Modes:
- * - Full E2E (paid): set BLOCKRUN_WALLET_KEY to run all tests.
- * - Non-paid checks: if BLOCKRUN_WALLET_KEY is unset, generates an ephemeral wallet
+ * - Full E2E (paid): set IgniteRouter_WALLET_KEY to run all tests.
+ * - Non-paid checks: if IgniteRouter_WALLET_KEY is unset, generates an ephemeral wallet
  *   and runs only local/non-paid checks.
  *
  * Usage:
- *   BLOCKRUN_WALLET_KEY=0x... npx tsx test-e2e.ts
+ *   IgniteRouter_WALLET_KEY=0x... npx tsx test-e2e.ts
  *   npx tsx test-e2e.ts
  */
 
 import { startProxy, type ProxyHandle } from "../src/proxy.js";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
-const ENV_WALLET_KEY = process.env.BLOCKRUN_WALLET_KEY?.trim();
+const ENV_WALLET_KEY = process.env.IgniteRouter_WALLET_KEY?.trim();
 if (ENV_WALLET_KEY && !/^0x[0-9a-fA-F]{64}$/.test(ENV_WALLET_KEY)) {
-  console.error("ERROR: BLOCKRUN_WALLET_KEY must be 0x + 64 hex characters");
+  console.error("ERROR: IgniteRouter_WALLET_KEY must be 0x + 64 hex characters");
   process.exit(1);
 }
 
@@ -47,7 +47,7 @@ async function runPaidTest(
   proxy: ProxyHandle,
 ) {
   if (!RUN_PAID_TESTS) {
-    console.log(`  ${name} ... SKIP (requires funded BLOCKRUN_WALLET_KEY)`);
+    console.log(`  ${name} ... SKIP (requires funded IgniteRouter_WALLET_KEY)`);
     return true;
   }
   return test(name, fn, proxy);
@@ -89,12 +89,12 @@ function extractFirstMessageContent(payload: { text: string; json?: unknown }): 
 }
 
 async function main() {
-  console.log("\n=== ClawRouter e2e tests ===\n");
+  console.log("\n=== IgniteRouter e2e tests ===\n");
   if (RUN_PAID_TESTS) {
     console.log(`Mode: FULL (paid + non-paid checks), wallet=${WALLET_ADDRESS}`);
   } else {
     console.log(`Mode: NON-PAID only (ephemeral wallet), wallet=${WALLET_ADDRESS}`);
-    console.log("Set BLOCKRUN_WALLET_KEY to run paid upstream request tests.");
+    console.log("Set IgniteRouter_WALLET_KEY to run paid upstream request tests.");
   }
   console.log();
 
@@ -203,16 +203,16 @@ async function main() {
       proxy,
     )) && allPassed;
 
-  // Test 4: Smart routing (blockrun/auto) — simple query
+  // Test 4: Smart routing (igniterouter/auto) — simple query
   allPassed =
     (await runPaidTest(
-      "Smart routing: simple query (blockrun/auto → should pick cheap model)",
+      "Smart routing: simple query (igniterouter/auto → should pick cheap model)",
       async (p) => {
         const res = await fetch(`${p.baseUrl}/v1/chat/completions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            model: "blockrun/auto",
+            model: "igniterouter/auto",
             messages: [
               {
                 role: "user",
@@ -242,13 +242,13 @@ async function main() {
   // Test 5: Smart routing — streaming
   allPassed =
     (await runPaidTest(
-      "Smart routing: streaming (blockrun/auto, stream=true)",
+      "Smart routing: streaming (igniterouter/auto, stream=true)",
       async (p) => {
         const res = await fetch(`${p.baseUrl}/v1/chat/completions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            model: "blockrun/auto",
+            model: "igniterouter/auto",
             messages: [{ role: "user", content: "Define gravity in one sentence." }],
             max_tokens: 50,
             stream: true,
@@ -679,3 +679,4 @@ main().catch((err) => {
   console.error("Fatal:", err);
   process.exit(1);
 });
+

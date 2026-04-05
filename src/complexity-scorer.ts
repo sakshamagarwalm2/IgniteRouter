@@ -155,43 +155,59 @@ function scoreViaKeywords(prompt: string): number {
   return Math.max(0.05, Math.min(0.95, score));
 }
 
+import { routingLog } from "./logger.js";
+
 export async function scoreComplexity(prompt: string, timeoutMs = 2000): Promise<ComplexityResult> {
-  const startTime = Date.now();
+  const result = await (async (): Promise<ComplexityResult> => {
+    const startTime = Date.now();
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-  try {
-    const encodedPrompt = encodeURIComponent(prompt);
-    const response = await fetch(`http://localhost:8500/score?prompt=${encodedPrompt}`, {
-      method: "GET",
-      signal: controller.signal,
-    });
+    try {
+      const encodedPrompt = encodeURIComponent(prompt);
+      const response = await fetch(`http://localhost:8500/score?prompt=${encodedPrompt}`, {
+        method: "GET",
+        signal: controller.signal,
+      });
 
-    clearTimeout(timeout);
+      clearTimeout(timeout);
 
-    if (response.ok) {
-      const data = (await response.json()) as { score?: number };
-      const score = typeof data.score === "number" ? data.score : 0.5;
-      const clampedScore = Math.max(0, Math.min(1, score));
+      if (response.ok) {
+        const data = (await response.json()) as { score?: number };
+        const score = typeof data.score === "number" ? data.score : 0.5;
+        const clampedScore = Math.max(0, Math.min(1, score));
 
-      return {
-        score: clampedScore,
-        tier: scoreToTier(clampedScore),
-        method: "routellm",
-        latencyMs: Date.now() - startTime,
-      };
+        routingLog.debug("RouteLLM score", { score: clampedScore, latencyMs: Date.now() - startTime });
+
+        return {
+          score: clampedScore,
+          tier: scoreToTier(clampedScore),
+          method: "routellm",
+          latencyMs: Date.now() - startTime,
+        };
+      }
+    } catch {
+      clearTimeout(timeout);
     }
-  } catch {
-    clearTimeout(timeout);
-  }
 
-  const keywordScore = scoreViaKeywords(prompt);
+    routingLog.debug("RouteLLM unavailable, using keyword fallback");
+    const keywordScore = scoreViaKeywords(prompt);
 
-  return {
-    score: keywordScore,
-    tier: scoreToTier(keywordScore),
-    method: "keyword-fallback",
-    latencyMs: Date.now() - startTime,
-  };
+    return {
+      score: keywordScore,
+      tier: scoreToTier(keywordScore),
+      method: "keyword-fallback",
+      latencyMs: Date.now() - startTime,
+    };
+  })();
+
+  routingLog.debug("Complexity score", { 
+    score: result.score, 
+    tier: result.tier, 
+    method: result.method, 
+    latencyMs: result.latencyMs 
+  });
+  
+  return result;
 }

@@ -1,5 +1,5 @@
 /**
- * Retry Logic for ClawRouter
+ * Retry Logic for IgniteRouter
  *
  * Provides fetch wrapper with exponential backoff for transient errors.
  * Retries on 429 (rate limit), 502, 503, 504 (server errors).
@@ -130,3 +130,4 @@ export function isRetryable(
     message.includes("socket hang up")
   );
 }
+

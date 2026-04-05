@@ -1,8 +1,10 @@
 import { classifyTask, TaskType } from "./task-classifier.js";
+import { routingLog } from "./logger.js";
 import { scoreComplexity, ComplexityTier } from "./complexity-scorer.js";
 import { detectOverride, OverrideResult } from "./override-detector.js";
 import { selectCandidates, SelectionResult } from "./priority-selector.js";
 import { UserProvider, IgniteConfig } from "./user-providers.js";
+import { RoutingTimer, type RoutingOverhead } from "./cost-estimator.js";
 
 export interface RoutingContext {
   messages: Array<{ role: string; content: unknown }>;
@@ -21,6 +23,8 @@ export interface RoutingDecision {
   candidateProviders: UserProvider[];
   error?: string;
   latencyMs: number;
+  routingOverhead?: RoutingOverhead;
+  tierConfigs?: Record<string, any>;
 }
 
 function detectImages(messages: Array<{ role: string; content: unknown }>): boolean {
@@ -61,7 +65,9 @@ export async function route(
   context: RoutingContext,
   config: IgniteConfig,
 ): Promise<RoutingDecision> {
+  const timer = new RoutingTimer();
   const startTime = Date.now();
+  routingLog.debug("Routing decision started", { model: context.requestedModel, tokens: context.estimatedTokens });
 
   const override = detectOverride(context.messages, context.requestedModel, config.providers);
 
@@ -88,6 +94,8 @@ export async function route(
       };
     }
 
+    routingLog.info("Override detected", { model: override.modelId, source: override.source });
+
     return {
       override,
       candidateProviders: [matchedProvider],
@@ -95,12 +103,18 @@ export async function route(
     };
   }
 
-  const taskType = classifyTask(context.messages, context.tools).taskType;
+  const taskResult = classifyTask(context.messages, context.tools);
+  const taskType = taskResult.taskType;
+  timer.mark("task");
+  routingLog.debug("Task classified", { taskType, confidence: taskResult.confidence, reason: taskResult.reason });
+
   const complexityResult = await scoreComplexity(
     typeof context.messages[context.messages.length - 1]?.content === "string"
       ? (context.messages[context.messages.length - 1].content as string)
       : "",
   );
+  timer.mark("complexity");
+  routingLog.debug("Complexity scored", { score: complexityResult.score, tier: complexityResult.tier, method: complexityResult.method });
 
   const hasImages = detectImages(context.messages);
   const hasTools = Array.isArray(context.tools) && context.tools.length > 0;
@@ -114,8 +128,16 @@ export async function route(
     config.defaultPriority,
     { hasImages, hasTools, needsStreaming, estimatedTokens },
   );
+  timer.mark("selection");
+
+  routingLog.info("Candidates selected", { 
+    count: selection.candidates.length, 
+    filtered: selection.filtered.length,
+    top: selection.candidates[0]?.provider.id ?? "none"
+  });
 
   if (selection.candidates.length === 0) {
+    routingLog.warn("No candidates after filtering", { filtered: selection.filtered.map(p => p.id) });
     const filteredReasons = Array.from(selection.filterReasons.entries())
       .map(([id, reason]) => `  ${id}: ${reason}`)
       .join("\n");
@@ -131,12 +153,15 @@ export async function route(
     };
   }
 
+  const overhead = timer.getOverhead();
+
   return {
     taskType,
     tier: complexityResult.tier,
     complexityScore: complexityResult.score,
     selection,
     candidateProviders: selection.candidates.map((c) => c.provider),
-    latencyMs: Date.now() - startTime,
+    latencyMs: overhead.totalRoutingMs,
+    routingOverhead: overhead,
   };
 }

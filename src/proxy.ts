@@ -2,11 +2,11 @@
  * Local Proxy Server
  *
  * Sits between OpenClaw's pi-ai (which makes standard OpenAI-format requests)
- * and BlockRun's API.
+ * and IgniteRouter's API.
  *
  * Flow:
  *   pi-ai → http://localhost:{port}/v1/chat/completions
- *        → proxy forwards to https://blockrun.ai/api/v1/chat/completions
+ *        → proxy forwards to https://IgniteRouter.ai/api/v1/chat/completions
  *        → streams response back to pi-ai
  *
  * Optimizations:
@@ -16,7 +16,9 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { estimateCost, estimateSavings } from "./cost-estimator.js";
 import { finished, Readable } from "node:stream";
+import { proxyLog } from "./logger.js";
 import type { AddressInfo } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -42,7 +44,7 @@ import { callWithFallback, type FallbackResult } from "./fallback-caller.js";
 import { loadProviders, type IgniteConfig, type UserProvider } from "./user-providers.js";
 import { classifyByRules } from "./router/rules.js";
 import {
-  BLOCKRUN_MODELS,
+  IgniteRouter_MODELS,
   OPENCLAW_MODELS,
   resolveModelAlias,
   getModelContextWindow,
@@ -71,18 +73,18 @@ import { SessionJournal } from "./journal.js";
 import { applyUpstreamProxy } from "./upstream-proxy.js";
 import { buildUpstreamRequest, stripProviderPrefix } from "./provider-url-builder.js";
 
-const BLOCKRUN_API = "https://blockrun.ai/api";
-const BLOCKRUN_SOLANA_API = "https://sol.blockrun.ai/api";
-const IMAGE_DIR = join(homedir(), ".openclaw", "blockrun", "images");
+const IgniteRouter_API = "https://IgniteRouter.ai/api";
+const IgniteRouter_SOLANA_API = "https://sol.IgniteRouter.ai/api";
+const IMAGE_DIR = join(homedir(), ".openclaw", "IgniteRouter", "images");
 // Routing profile models - virtual models that trigger intelligent routing
-const AUTO_MODEL = "blockrun/auto";
+const AUTO_MODEL = "igniterouter/auto";
 
 const ROUTING_PROFILES = new Set([
-  "blockrun/eco",
+  "IgniteRouter/eco",
   "eco",
-  "blockrun/auto",
+  "igniterouter/auto",
   "auto",
-  "blockrun/premium",
+  "IgniteRouter/premium",
   "premium",
   "igniterouter/auto",
 ]);
@@ -101,9 +103,9 @@ const FREE_MODELS = new Set([
   "free/llama-4-maverick",
 ]);
 /**
- * Map free/xxx model IDs to nvidia/xxx for upstream BlockRun API.
- * The "free/" prefix is a ClawRouter convention for the /model picker;
- * BlockRun server expects "nvidia/" prefix.
+ * Map free/xxx model IDs to nvidia/xxx for upstream IgniteRouter API.
+ * The "free/" prefix is a IgniteRouter convention for the /model picker;
+ * IgniteRouter server expects "nvidia/" prefix.
  */
 function toUpstreamModelId(modelId: string): string {
   if (modelId.startsWith("free/")) {
@@ -111,7 +113,7 @@ function toUpstreamModelId(modelId: string): string {
   }
   return modelId;
 }
-const MAX_MESSAGES = 200; // BlockRun API limit - truncate older messages if exceeded
+const MAX_MESSAGES = 200; // IgniteRouter API limit - truncate older messages if exceeded
 const CONTEXT_LIMIT_KB = 5120; // Server-side limit: 5MB in KB
 const HEARTBEAT_INTERVAL_MS = 2_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 180_000; // 3 minutes (allows for on-chain tx + LLM response)
@@ -165,7 +167,7 @@ function transformPaymentError(errorBody: string): string {
     const parsed = JSON.parse(errorBody) as {
       error?: string;
       details?: string;
-      // blockrun-sol (Solana) format uses code+debug instead of details
+      // IgniteRouter-sol (Solana) format uses code+debug instead of details
       code?: string;
       debug?: string;
       payer?: string;
@@ -216,7 +218,7 @@ function transformPaymentError(errorBody: string): string {
             error: {
               message: "Payment signature invalid. This may be a temporary issue.",
               type: "invalid_payload",
-              help: "Try again. If this persists, reinstall ClawRouter: curl -fsSL https://blockrun.ai/ClawRouter-update | bash",
+              help: "Try again. If this persists, reinstall IgniteRouter: curl -fsSL https://IgniteRouter.ai/IgniteRouter-update | bash",
             },
           });
         }
@@ -224,7 +226,7 @@ function transformPaymentError(errorBody: string): string {
         // Handle transaction simulation failures (Solana on-chain validation)
         if (innerJson.invalidReason === "transaction_simulation_failed") {
           console.error(
-            `[ClawRouter] Solana transaction simulation failed: ${innerJson.invalidMessage || "unknown"}`,
+            `[IgniteRouter] Solana transaction simulation failed: ${innerJson.invalidMessage || "unknown"}`,
           );
           return JSON.stringify({
             error: {
@@ -237,7 +239,7 @@ function transformPaymentError(errorBody: string): string {
       }
     }
 
-    // Handle blockrun-sol (Solana) format: code=PAYMENT_INVALID + debug=invalidReason string
+    // Handle IgniteRouter-sol (Solana) format: code=PAYMENT_INVALID + debug=invalidReason string
     if (
       parsed.error === "Payment verification failed" &&
       parsed.code === "PAYMENT_INVALID" &&
@@ -263,7 +265,7 @@ function transformPaymentError(errorBody: string): string {
         debugLower.includes("transaction_simulation_failed") ||
         debugLower.includes("simulation")
       ) {
-        console.error(`[ClawRouter] Solana transaction simulation failed: ${parsed.debug}`);
+        proxyLog.error(` Solana transaction simulation failed: ${parsed.debug}`);
         return JSON.stringify({
           error: {
             message: "Solana payment simulation failed. Retrying with a different model.",
@@ -278,7 +280,7 @@ function transformPaymentError(errorBody: string): string {
           error: {
             message: "Solana payment signature invalid.",
             type: "invalid_payload",
-            help: "Try again. If this persists, reinstall ClawRouter: curl -fsSL https://blockrun.ai/ClawRouter-update | bash",
+            help: "Try again. If this persists, reinstall IgniteRouter: curl -fsSL https://IgniteRouter.ai/IgniteRouter-update | bash",
           },
         });
       }
@@ -295,7 +297,7 @@ function transformPaymentError(errorBody: string): string {
 
       // Unknown Solana verification error — surface the debug reason
       console.error(
-        `[ClawRouter] Solana payment verification failed: ${parsed.debug} payer=${wallet}`,
+        `[IgniteRouter] Solana payment verification failed: ${parsed.debug} payer=${wallet}`,
       );
       return JSON.stringify({
         error: {
@@ -427,7 +429,7 @@ function isRateLimited(modelId: string): boolean {
  */
 function markRateLimited(modelId: string): void {
   rateLimitedModels.set(modelId, Date.now());
-  console.log(`[ClawRouter] Model ${modelId} rate-limited, will deprioritize for 60s`);
+  proxyLog.info(` Model ${modelId} rate-limited, will deprioritize for 60s`);
 }
 
 /**
@@ -436,7 +438,7 @@ function markRateLimited(modelId: string): void {
  */
 function markOverloaded(modelId: string): void {
   overloadedModels.set(modelId, Date.now());
-  console.log(`[ClawRouter] Model ${modelId} overloaded, will deprioritize for 15s`);
+  proxyLog.info(` Model ${modelId} overloaded, will deprioritize for 15s`);
 }
 
 /** Check if a model is in its overload cooldown period. */
@@ -489,7 +491,7 @@ function canWrite(res: ServerResponse): boolean {
 function safeWrite(res: ServerResponse, data: string | Buffer): boolean {
   if (!canWrite(res)) {
     const bytes = typeof data === "string" ? Buffer.byteLength(data) : data.length;
-    console.warn(`[ClawRouter] safeWrite: socket not writable, dropping ${bytes} bytes`);
+    proxyLog.warn(` safeWrite: socket not writable, dropping ${bytes} bytes`);
     return false;
   }
   return res.write(data);
@@ -965,15 +967,15 @@ export function normalizeMessagesForThinking(
 }
 
 /**
- * Remove "blockrun" branding from system messages before sending upstream.
+ * Remove "IgniteRouter" branding from system messages before sending upstream.
  *
- * OpenClaw embeds `model=blockrun/auto` and `default_model=blockrun/auto` in its
- * system prompt Runtime section. LLMs pick up "blockrun" and adopt it as their
- * identity (e.g. "I'm Blockrun"), overriding the user's SOUL.md persona.
+ * OpenClaw embeds `model=igniterouter/auto` and `default_model=igniterouter/auto` in its
+ * system prompt Runtime section. LLMs pick up "IgniteRouter" and adopt it as their
+ * identity (e.g. "I'm IgniteRouter"), overriding the user's SOUL.md persona.
  *
- * This function replaces `blockrun/<profile>` references with the actual resolved
- * model name, and strips any remaining "blockrun/" prefix so the upstream LLM
- * never sees "blockrun" as an identity to adopt.
+ * This function replaces `IgniteRouter/<profile>` references with the actual resolved
+ * model name, and strips any remaining "IgniteRouter/" prefix so the upstream LLM
+ * never sees "IgniteRouter" as an identity to adopt.
  */
 export function debrandSystemMessages(
   messages: ChatMessage[],
@@ -981,9 +983,9 @@ export function debrandSystemMessages(
 ): ChatMessage[] {
   // Routing profile names that get replaced with the actual model
   const PROFILE_NAMES = ["auto", "free", "eco", "premium"];
-  const profilePattern = new RegExp(`\\bblockrun/(${PROFILE_NAMES.join("|")})\\b`, "gi");
-  // Also handle "blockrun/<provider>/<model>" → "<provider>/<model>"
-  const prefixPattern = /\bblockrun\/(?=[a-z])/gi;
+  const profilePattern = new RegExp(`\\bIgniteRouter/(${PROFILE_NAMES.join("|")})\\b`, "gi");
+  // Also handle "IgniteRouter/<provider>/<model>" → "<provider>/<model>"
+  const prefixPattern = /\bIgniteRouter\/(?=[a-z])/gi;
 
   let hasChanges = false;
   const result = messages.map((msg) => {
@@ -991,10 +993,10 @@ export function debrandSystemMessages(
 
     let content = msg.content;
 
-    // Replace routing profiles (blockrun/auto etc.) with resolved model
+    // Replace routing profiles (igniterouter/auto etc.) with resolved model
     const afterProfiles = content.replace(profilePattern, resolvedModel);
 
-    // Replace remaining blockrun/ prefix (e.g. blockrun/openai/gpt-4o → openai/gpt-4o)
+    // Replace remaining IgniteRouter/ prefix (e.g. IgniteRouter/openai/gpt-4o → openai/gpt-4o)
     const afterPrefix = afterProfiles.replace(prefixPattern, "");
 
     if (afterPrefix !== content) {
@@ -1019,7 +1021,7 @@ type TruncationResult<T> = {
 };
 
 /**
- * Truncate messages to stay under BlockRun's MAX_MESSAGES limit.
+ * Truncate messages to stay under IgniteRouter's MAX_MESSAGES limit.
  * Keeps all system messages and the most recent conversation history.
  * Returns the messages and whether truncation occurred.
  */
@@ -1044,7 +1046,7 @@ function truncateMessages<T extends { role: string }>(messages: T[]): Truncation
   const result = [...systemMsgs, ...truncatedConversation];
 
   console.log(
-    `[ClawRouter] Truncated messages: ${messages.length} → ${result.length} (kept ${systemMsgs.length} system + ${truncatedConversation.length} recent)`,
+    `[IgniteRouter] Truncated messages: ${messages.length} → ${result.length} (kept ${systemMsgs.length} system + ${truncatedConversation.length} recent)`,
   );
 
   return {
@@ -1133,11 +1135,11 @@ function estimateTokenCount(messages: unknown[]): number {
 }
 
 /**
- * Build model pricing map from BLOCKRUN_MODELS.
+ * Build model pricing map from IgniteRouter_MODELS.
  */
 function buildModelPricing(): Map<string, ModelPricing> {
   const map = new Map<string, ModelPricing>();
-  for (const m of BLOCKRUN_MODELS) {
+  for (const m of IgniteRouter_MODELS) {
     if (m.id === AUTO_MODEL) continue; // skip meta-model
     const promoPrice = getActivePromoPrice(m);
     map.set(m.id, {
@@ -1172,7 +1174,7 @@ export function buildProxyModelList(
     id: model.id,
     object: "model",
     created: createdAt,
-    owned_by: model.id.includes("/") ? (model.id.split("/")[0] ?? "blockrun") : "blockrun",
+    owned_by: model.id.includes("/") ? (model.id.split("/")[0] ?? "IgniteRouter") : "IgniteRouter",
   }));
 }
 
@@ -1200,7 +1202,7 @@ function estimateAmount(
   bodyLength: number,
   maxTokens: number,
 ): string | undefined {
-  const model = BLOCKRUN_MODELS.find((m) => m.id === modelId);
+  const model = IgniteRouter_MODELS.find((m) => m.id === modelId);
   if (!model) return undefined;
 
   let costUsd: number;
@@ -1223,7 +1225,7 @@ function estimateAmount(
   return amountMicros.toString();
 }
 
-// Image pricing table (must match server's IMAGE_MODELS in blockrun/src/lib/models.ts)
+// Image pricing table (must match server's IMAGE_MODELS in IgniteRouter/src/lib/models.ts)
 // Server applies 5% margin on top of these prices.
 const IMAGE_PRICING: Record<string, { default: number; sizes?: Record<string, number> }> = {
   "openai/dall-e-3": {
@@ -1274,7 +1276,7 @@ async function proxyPartnerRequest(
   for await (const chunk of req) {
     bodyChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
-  const body = Buffer.concat(bodyChunks);
+  let body = Buffer.concat(bodyChunks);
 
   // Forward headers (strip hop-by-hop)
   const headers: Record<string, string> = {};
@@ -1291,7 +1293,7 @@ async function proxyPartnerRequest(
   if (!headers["content-type"]) headers["content-type"] = "application/json";
   headers["user-agent"] = USER_AGENT;
 
-  console.log(`[IgniteRouter] Partner request: ${req.method} ${req.url}`);
+  proxyLog.info(` Partner request: ${req.method} ${req.url}`);
 
   const upstream = await fetch(upstreamUrl, {
     method: req.method ?? "POST",
@@ -1319,7 +1321,7 @@ async function proxyPartnerRequest(
   res.end();
 
   const latencyMs = Date.now() - startTime;
-  console.log(`[IgniteRouter] Partner response: ${upstream.status} (${latencyMs}ms)`);
+  proxyLog.info(` Partner response: ${upstream.status} (${latencyMs}ms)`);
 
   logUsage({
     timestamp: new Date().toISOString(),
@@ -1407,10 +1409,10 @@ async function uploadDataUriToHost(dataUri: string): Promise<string> {
 export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
   const upstreamProxy = await applyUpstreamProxy(options.upstreamProxy);
   if (upstreamProxy) {
-    console.log(`[IgniteRouter] Upstream proxy: ${upstreamProxy}`);
+    proxyLog.info(` Upstream proxy: ${upstreamProxy}`);
   }
 
-  const apiBase = options.apiBase ?? BLOCKRUN_API;
+  const apiBase = options.apiBase ?? IgniteRouter_API;
   const listenPort = options.port ?? getProxyPort();
 
   const existingProxy = await checkExistingProxy(listenPort);
@@ -1439,22 +1441,22 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     req.on("error", (err) => {
-      console.error(`[IgniteRouter] Request stream error: ${err.message}`);
+      proxyLog.error(` Request stream error: ${err.message}`);
     });
 
     res.on("error", (err) => {
-      console.error(`[IgniteRouter] Response stream error: ${err.message}`);
+      proxyLog.error(` Response stream error: ${err.message}`);
     });
 
     finished(res, (err) => {
       if (err && err.code !== "ERR_STREAM_DESTROYED") {
-        console.error(`[IgniteRouter] Response finished with error: ${err.message}`);
+        proxyLog.error(` Response finished with error: ${err.message}`);
       }
     });
 
     finished(req, (err) => {
       if (err && err.code !== "ERR_STREAM_DESTROYED") {
-        console.error(`[IgniteRouter] Request finished with error: ${err.message}`);
+        proxyLog.error(` Request finished with error: ${err.message}`);
       }
     });
 
@@ -1643,7 +1645,7 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
               const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
               await writeFile(join(IMAGE_DIR, filename), Buffer.from(b64!, "base64"));
               img.url = `http://localhost:${port}/images/${filename}`;
-              console.log(`[IgniteRouter] Image saved → ${img.url}`);
+              proxyLog.info(` Image saved → ${img.url}`);
             } else if (img.url?.startsWith("https://") || img.url?.startsWith("http://")) {
               try {
                 const imgResp = await fetch(img.url);
@@ -1659,7 +1661,7 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
                   const buf = Buffer.from(await imgResp.arrayBuffer());
                   await writeFile(join(IMAGE_DIR, filename), buf);
                   img.url = `http://localhost:${port}/images/${filename}`;
-                  console.log(`[IgniteRouter] Image downloaded & saved → ${img.url}`);
+                  proxyLog.info(` Image downloaded & saved → ${img.url}`);
                 }
               } catch (downloadErr) {
                 console.warn(
@@ -1682,7 +1684,7 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
         res.end(JSON.stringify(result));
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[IgniteRouter] Image generation error: ${msg}`);
+        proxyLog.error(` Image generation error: ${msg}`);
         if (!res.headersSent) {
           res.writeHead(502, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "Image generation failed", details: msg }));
@@ -1721,7 +1723,7 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
             );
           } else {
             parsed[field] = readImageFileAsDataUri(val);
-            console.log(`[IgniteRouter] img2img: read ${field} file → data URI`);
+            proxyLog.info(` img2img: read ${field} file → data URI`);
           }
         }
         if (!parsed.model) parsed.model = "openai/gpt-image-1";
@@ -1766,7 +1768,7 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
               const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
               await writeFile(join(IMAGE_DIR, filename), Buffer.from(b64!, "base64"));
               img.url = `http://localhost:${port}/images/${filename}`;
-              console.log(`[IgniteRouter] Image saved → ${img.url}`);
+              proxyLog.info(` Image saved → ${img.url}`);
             } else if (img.url?.startsWith("https://") || img.url?.startsWith("http://")) {
               try {
                 const imgResp = await fetch(img.url);
@@ -1782,7 +1784,7 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
                   const buf = Buffer.from(await imgResp.arrayBuffer());
                   await writeFile(join(IMAGE_DIR, filename), buf);
                   img.url = `http://localhost:${port}/images/${filename}`;
-                  console.log(`[IgniteRouter] Image downloaded & saved → ${img.url}`);
+                  proxyLog.info(` Image downloaded & saved → ${img.url}`);
                 }
               } catch (downloadErr) {
                 console.warn(
@@ -1805,7 +1807,7 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
         res.end(JSON.stringify(result));
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[IgniteRouter] Image editing error: ${msg}`);
+        proxyLog.error(` Image editing error: ${msg}`);
         if (!res.headersSent) {
           res.writeHead(502, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "Image editing failed", details: msg }));
@@ -1879,7 +1881,7 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
         if (err.code === "EADDRINUSE") {
           const existingProxy2 = await checkExistingProxy(listenPort);
           if (existingProxy2) {
-            console.log(`[IgniteRouter] Existing proxy detected on port ${listenPort}, reusing`);
+            proxyLog.info(` Existing proxy detected on port ${listenPort}, reusing`);
             rejectAttempt({ code: "REUSE_EXISTING" });
             return;
           }
@@ -1947,15 +1949,16 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
   const baseUrl = `http://127.0.0.1:${port}`;
 
   options.onReady?.(port);
+  proxyLog.info("Proxy started", { port, providers: options.igniteConfig?.providers?.length ?? 0 });
   checkForUpdates();
 
   server.on("error", (err) => {
-    console.error(`[IgniteRouter] Server runtime error: ${err.message}`);
+    proxyLog.error(` Server runtime error: ${err.message}`);
     options.onError?.(err);
   });
 
   server.on("clientError", (err, socket) => {
-    console.error(`[IgniteRouter] Client error: ${err.message}`);
+    proxyLog.error(` Client error: ${err.message}`);
     if (socket.writable && !socket.destroyed) {
       socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
     }
@@ -1966,14 +1969,14 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
     socket.setTimeout(300_000);
 
     socket.on("timeout", () => {
-      console.error(`[IgniteRouter] Socket timeout, destroying connection`);
+      proxyLog.error(` Socket timeout, destroying connection`);
       socket.destroy();
     });
 
     socket.on("end", () => {});
 
     socket.on("error", (err) => {
-      console.error(`[IgniteRouter] Socket error: ${err.message}`);
+      proxyLog.error(` Socket error: ${err.message}`);
     });
 
     socket.on("close", () => {
@@ -2042,13 +2045,13 @@ async function tryModelRequest(
       parsed.messages = normalizeMessageRoles(parsed.messages as ChatMessage[]);
     }
 
-    // Remove "blockrun" branding from system messages so upstream LLMs don't
-    // adopt "Blockrun" as their identity (overriding user's SOUL.md persona).
+    // Remove "IgniteRouter" branding from system messages so upstream LLMs don't
+    // adopt "IgniteRouter" as their identity (overriding user's SOUL.md persona).
     if (Array.isArray(parsed.messages)) {
       parsed.messages = debrandSystemMessages(parsed.messages as ChatMessage[], modelId);
     }
 
-    // Truncate messages to stay under BlockRun's limit (200 messages)
+    // Truncate messages to stay under IgniteRouter's limit (200 messages)
     if (Array.isArray(parsed.messages)) {
       const truncationResult = truncateMessages(parsed.messages as ChatMessage[]);
       parsed.messages = truncationResult.messages;
@@ -2140,7 +2143,7 @@ async function tryModelRequest(
 }
 
 /**
- * Proxy a single request to BlockRun API.
+ * Proxy a single request to IgniteRouter API.
  *
  * Optimizations applied in order:
  *   1. Dedup check — if same request body seen within 30s, replay cached response
@@ -2161,7 +2164,7 @@ async function proxyRequest(
 ): Promise<void> {
   const startTime = Date.now();
 
-  // Build upstream URL: /v1/chat/completions → https://blockrun.ai/api/v1/chat/completions
+  // Build upstream URL: /v1/chat/completions → https://IgniteRouter.ai/api/v1/chat/completions
   const upstreamUrl = `${apiBase}${req.url}`;
 
   // Collect request body
@@ -2170,12 +2173,24 @@ async function proxyRequest(
     bodyChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
   let body = Buffer.concat(bodyChunks);
+  let parsed: any;
+  try {
+    parsed = JSON.parse(body.toString());
+  } catch (e) {
+    // Not JSON or empty body
+  }
+
+  proxyLog.debug("Request received", { 
+    model: parsed?.model, 
+    stream: parsed?.stream, 
+    msgCount: parsed?.messages?.length 
+  });
 
   // Track original context size for response headers
   const originalContextSizeKB = Math.ceil(body.length / 1024);
 
-  // Routing debug info is on by default; disable with x-clawrouter-debug: false
-  const debugMode = req.headers["x-clawrouter-debug"] !== "false";
+  // Routing debug info is on by default; disable with x-IgniteRouter-debug: false
+  const debugMode = req.headers["x-IgniteRouter-debug"] !== "false";
 
   // --- Smart routing ---
   let routingDecision: RoutingDecision | undefined;
@@ -2350,7 +2365,7 @@ async function proxyRequest(
       const useIgniteRouting = igniteCfg.providers && igniteCfg.providers.length > 0;
 
       if (useIgniteRouting) {
-        console.log(`[IgniteRouter] Using ignite routing engine with ${igniteCfg.providers.length} provider(s)`);
+        proxyLog.info("Using IgniteRouter routing engine", { providers: igniteCfg.providers.length });
 
         const routingContext: RoutingContext = {
           messages: parsedMessages,
@@ -2363,7 +2378,7 @@ async function proxyRequest(
         const igniteDecision = await igniteRoute(routingContext, igniteCfg);
 
         if (igniteDecision.error) {
-          console.log(`[IgniteRouter] Routing error: ${igniteDecision.error}`);
+          proxyLog.error("Routing failed — no candidates available", { error: igniteDecision.error });
           res.writeHead(400, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: { message: igniteDecision.error, type: "invalid_request_error" } }));
           return;
@@ -2387,7 +2402,7 @@ async function proxyRequest(
         const fallbackResult = await callWithFallback(igniteCandidates, (provider) => buildRequestInit(provider), { timeoutMs: options.requestTimeoutMs ?? 30000, retryableOnly: true });
 
         if (!fallbackResult.success) {
-          console.log(`[IgniteRouter] All models failed: ${fallbackResult.errorSummary}`);
+          proxyLog.error("All providers failed", { tried: fallbackResult.attempts.map((a) => a.provider.id) });
           res.writeHead(503, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: { message: fallbackResult.errorSummary ?? "All models failed", type: "service_unavailable" } }));
           return;
@@ -2402,6 +2417,31 @@ async function proxyRequest(
           });
 
           const usedProvider = fallbackResult.usedProvider as UserProvider;
+          const selectedModel = usedProvider.id;
+          
+          proxyLog.info("Request completed", { 
+            model: selectedModel, 
+            tier: igniteDecision.tier,
+            task: igniteDecision.taskType,
+            latencyMs: Date.now() - startTime,
+            attempts: fallbackResult.attempts.length
+          });
+
+          // After successful response (you have usage from the LLM response if available):
+          // Extract content and token usage from non-streaming response
+          let finalResponseInputTokens = responseInputTokens ?? estimateTokenCount(parsedMessages);
+          let finalResponseOutputTokens = responseOutputTokens ?? 100;
+
+          const cost = estimateCost(usedProvider, finalResponseInputTokens, finalResponseOutputTokens);
+          const savings = estimateSavings(cost, igniteCfg.providers, finalResponseInputTokens, finalResponseOutputTokens);
+
+          proxyLog.info("Cost estimate", {
+            model: cost.modelId,
+            cost: cost.formattedCost,
+            savings: savings.formattedSavings,
+            routingOverheadMs: igniteDecision.routingOverhead?.totalRoutingMs ?? igniteDecision.latencyMs
+          });
+
           res.setHeader("X-IgniteRouter-Model", usedProvider.id);
           res.setHeader("X-IgniteRouter-Tier", igniteDecision.tier || "UNKNOWN");
           res.setHeader("X-IgniteRouter-Task", igniteDecision.taskType || "UNKNOWN");
@@ -2411,7 +2451,7 @@ async function proxyRequest(
             const s = Readable.fromWeb(fallbackResult.finalResponse.body as any);
             finished(s, (err) => {
               if (err && err.code !== "ERR_STREAM_DESTROYED")
-                console.error(`[IgniteRouter] Stream error: ${err.message}`);
+                proxyLog.error(` Stream error: ${err.message}`);
             });
             s.pipe(res);
           } else {
@@ -2433,7 +2473,7 @@ async function proxyRequest(
         // Determine routing profile
         const normalizedModel =
           typeof parsed.model === "string" ? parsed.model.trim().toLowerCase() : "";
-        const profileName = normalizedModel.replace("blockrun/", "");
+        const profileName = normalizedModel.replace("IgniteRouter/", "");
         const debugProfile = (
           ["eco", "auto", "premium"].includes(profileName) ? profileName : "auto"
         ) as "eco" | "auto" | "premium";
@@ -2474,7 +2514,7 @@ async function proxyRequest(
           DEFAULT_ROUTING_CONFIG.scoring.tierBoundaries;
 
         const debugText = [
-          "ClawRouter Debug",
+          "IgniteRouter Debug",
           "",
           `Profile: ${debugProfile} | Tier: ${debugRouting.tier} | Model: ${debugRouting.model}`,
           `Confidence: ${debugRouting.confidence.toFixed(2)} | Cost: $${debugRouting.costEstimate.toFixed(4)} | Savings: ${(debugRouting.savings * 100).toFixed(0)}%`,
@@ -2495,7 +2535,7 @@ async function proxyRequest(
           id: completionId,
           object: "chat.completion",
           created: timestamp,
-          model: "clawrouter/debug",
+          model: "IgniteRouter/debug",
           choices: [
             {
               index: 0,
@@ -2517,7 +2557,7 @@ async function proxyRequest(
             id: completionId,
             object: "chat.completion.chunk",
             created: timestamp,
-            model: "clawrouter/debug",
+            model: "IgniteRouter/debug",
             choices: [
               {
                 index: 0,
@@ -2530,7 +2570,7 @@ async function proxyRequest(
             id: completionId,
             object: "chat.completion.chunk",
             created: timestamp,
-            model: "clawrouter/debug",
+            model: "IgniteRouter/debug",
             choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
           };
           res.write(`data: ${JSON.stringify(sseChunk)}\n\n`);
@@ -2541,11 +2581,11 @@ async function proxyRequest(
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify(syntheticResponse));
         }
-        console.log(`[ClawRouter] /debug command → ${debugRouting.tier} | ${debugRouting.model}`);
+        proxyLog.info(` /debug command → ${debugRouting.tier} | ${debugRouting.model}`);
         return;
       }
 
-      // --- /imagegen command: generate an image via BlockRun image API ---
+      // --- /imagegen command: generate an image via IgniteRouter image API ---
       if (lastContent.startsWith("/imagegen")) {
         const imageArgs = lastContent.slice("/imagegen".length).trim();
 
@@ -2613,10 +2653,10 @@ async function proxyRequest(
               Connection: "keep-alive",
             });
             res.write(
-              `data: ${JSON.stringify({ id: completionId, object: "chat.completion.chunk", created: timestamp, model: "clawrouter/image", choices: [{ index: 0, delta: { role: "assistant", content: errorText }, finish_reason: null }] })}\n\n`,
+              `data: ${JSON.stringify({ id: completionId, object: "chat.completion.chunk", created: timestamp, model: "IgniteRouter/image", choices: [{ index: 0, delta: { role: "assistant", content: errorText }, finish_reason: null }] })}\n\n`,
             );
             res.write(
-              `data: ${JSON.stringify({ id: completionId, object: "chat.completion.chunk", created: timestamp, model: "clawrouter/image", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`,
+              `data: ${JSON.stringify({ id: completionId, object: "chat.completion.chunk", created: timestamp, model: "IgniteRouter/image", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`,
             );
             res.write("data: [DONE]\n\n");
             res.end();
@@ -2627,7 +2667,7 @@ async function proxyRequest(
                 id: completionId,
                 object: "chat.completion",
                 created: timestamp,
-                model: "clawrouter/image",
+                model: "IgniteRouter/image",
                 choices: [
                   {
                     index: 0,
@@ -2639,13 +2679,13 @@ async function proxyRequest(
               }),
             );
           }
-          console.log(`[ClawRouter] /imagegen command → showing usage help`);
+          proxyLog.info(` /imagegen command → showing usage help`);
           return;
         }
 
         // Call upstream image generation API
         console.log(
-          `[ClawRouter] /imagegen command → ${imageModel} (${imageSize}): ${imagePrompt.slice(0, 80)}...`,
+          `[IgniteRouter] /imagegen command → ${imageModel} (${imageSize}): ${imagePrompt.slice(0, 80)}...`,
         );
         try {
           const imageUpstreamUrl = `${apiBase}/v1/images/generations`;
@@ -2675,7 +2715,7 @@ async function proxyRequest(
                 : ((imageResult.error as { message?: string })?.message ??
                   `HTTP ${imageResponse.status}`);
             responseText = `Image generation failed: ${errMsg}`;
-            console.log(`[ClawRouter] /imagegen error: ${errMsg}`);
+            proxyLog.info(` /imagegen error: ${errMsg}`);
           } else {
             const images = imageResult.data ?? [];
             if (images.length === 0) {
@@ -2690,7 +2730,7 @@ async function proxyRequest(
                       lines.push(hostedUrl);
                     } catch (uploadErr) {
                       console.error(
-                        `[ClawRouter] /imagegen: failed to upload data URI: ${uploadErr instanceof Error ? uploadErr.message : String(uploadErr)}`,
+                        `[IgniteRouter] /imagegen: failed to upload data URI: ${uploadErr instanceof Error ? uploadErr.message : String(uploadErr)}`,
                       );
                       lines.push(
                         "Image generated but upload failed. Try again or use --model dall-e-3.",
@@ -2705,7 +2745,7 @@ async function proxyRequest(
               lines.push("", `Model: ${imageModel} | Size: ${imageSize}`);
               responseText = lines.join("\n");
             }
-            console.log(`[IgniteRouter] /imagegen success: ${images.length} image(s) generated`);
+            proxyLog.info(` /imagegen success: ${images.length} image(s) generated`);
             const imagegenActualCost = estimateImageCost(imageModel, imageSize, 1);
             logUsage({
               timestamp: new Date().toISOString(),
@@ -2728,10 +2768,10 @@ async function proxyRequest(
               Connection: "keep-alive",
             });
             res.write(
-              `data: ${JSON.stringify({ id: completionId, object: "chat.completion.chunk", created: timestamp, model: "clawrouter/image", choices: [{ index: 0, delta: { role: "assistant", content: responseText }, finish_reason: null }] })}\n\n`,
+              `data: ${JSON.stringify({ id: completionId, object: "chat.completion.chunk", created: timestamp, model: "IgniteRouter/image", choices: [{ index: 0, delta: { role: "assistant", content: responseText }, finish_reason: null }] })}\n\n`,
             );
             res.write(
-              `data: ${JSON.stringify({ id: completionId, object: "chat.completion.chunk", created: timestamp, model: "clawrouter/image", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`,
+              `data: ${JSON.stringify({ id: completionId, object: "chat.completion.chunk", created: timestamp, model: "IgniteRouter/image", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`,
             );
             res.write("data: [DONE]\n\n");
             res.end();
@@ -2742,7 +2782,7 @@ async function proxyRequest(
                 id: completionId,
                 object: "chat.completion",
                 created: timestamp,
-                model: "clawrouter/image",
+                model: "IgniteRouter/image",
                 choices: [
                   {
                     index: 0,
@@ -2756,7 +2796,7 @@ async function proxyRequest(
           }
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
-          console.error(`[ClawRouter] /imagegen error: ${errMsg}`);
+          proxyLog.error(` /imagegen error: ${errMsg}`);
           if (!res.headersSent) {
             res.writeHead(500, { "Content-Type": "application/json" });
             res.end(
@@ -2769,7 +2809,7 @@ async function proxyRequest(
         return;
       }
 
-      // --- /img2img command: edit an image via BlockRun image2image API ---
+      // --- /img2img command: edit an image via IgniteRouter image2image API ---
       if (lastContent.startsWith("/img2img")) {
         const imgArgs = lastContent.slice("/img2img".length).trim();
 
@@ -2836,10 +2876,10 @@ async function proxyRequest(
               Connection: "keep-alive",
             });
             res.write(
-              `data: ${JSON.stringify({ id: completionId, object: "chat.completion.chunk", created: timestamp, model: "clawrouter/img2img", choices: [{ index: 0, delta: { role: "assistant", content: text }, finish_reason: null }] })}\n\n`,
+              `data: ${JSON.stringify({ id: completionId, object: "chat.completion.chunk", created: timestamp, model: "IgniteRouter/img2img", choices: [{ index: 0, delta: { role: "assistant", content: text }, finish_reason: null }] })}\n\n`,
             );
             res.write(
-              `data: ${JSON.stringify({ id: completionId, object: "chat.completion.chunk", created: timestamp, model: "clawrouter/img2img", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`,
+              `data: ${JSON.stringify({ id: completionId, object: "chat.completion.chunk", created: timestamp, model: "IgniteRouter/img2img", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`,
             );
             res.write("data: [DONE]\n\n");
             res.end();
@@ -2850,7 +2890,7 @@ async function proxyRequest(
                 id: completionId,
                 object: "chat.completion",
                 created: timestamp,
-                model: "clawrouter/img2img",
+                model: "IgniteRouter/img2img",
                 choices: [
                   {
                     index: 0,
@@ -2881,7 +2921,7 @@ async function proxyRequest(
         }
 
         console.log(
-          `[ClawRouter] /img2img → ${img2imgModel} (${img2imgSize}): ${img2imgPrompt.slice(0, 80)}`,
+          `[IgniteRouter] /img2img → ${img2imgModel} (${img2imgSize}): ${img2imgPrompt.slice(0, 80)}`,
         );
 
         try {
@@ -2914,7 +2954,7 @@ async function proxyRequest(
                 : ((img2imgResult.error as { message?: string })?.message ??
                   `HTTP ${img2imgResponse.status}`);
             responseText = `Image editing failed: ${errMsg}`;
-            console.log(`[ClawRouter] /img2img error: ${errMsg}`);
+            proxyLog.info(` /img2img error: ${errMsg}`);
           } else {
             const images = img2imgResult.data ?? [];
             if (images.length === 0) {
@@ -2929,7 +2969,7 @@ async function proxyRequest(
                       lines.push(hostedUrl);
                     } catch (uploadErr) {
                       console.error(
-                        `[ClawRouter] /img2img: failed to upload data URI: ${uploadErr instanceof Error ? uploadErr.message : String(uploadErr)}`,
+                        `[IgniteRouter] /img2img: failed to upload data URI: ${uploadErr instanceof Error ? uploadErr.message : String(uploadErr)}`,
                       );
                       lines.push("Image edited but upload failed. Try again.");
                     }
@@ -2942,7 +2982,7 @@ async function proxyRequest(
               lines.push("", `Model: ${img2imgModel} | Size: ${img2imgSize}`);
               responseText = lines.join("\n");
             }
-            console.log(`[IgniteRouter] /img2img success: ${images.length} image(s)`);
+            proxyLog.info(` /img2img success: ${images.length} image(s)`);
             const img2imgActualCost2 = estimateImageCost(img2imgModel, img2imgSize, 1);
             logUsage({
               timestamp: new Date().toISOString(),
@@ -2958,7 +2998,7 @@ async function proxyRequest(
           sendImg2ImgText(responseText);
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
-          console.error(`[ClawRouter] /img2img error: ${errMsg}`);
+          proxyLog.error(` /img2img error: ${errMsg}`);
           if (!res.headersSent) {
             res.writeHead(500, { "Content-Type": "application/json" });
             res.end(
@@ -2971,8 +3011,8 @@ async function proxyRequest(
         return;
       }
 
-      // Force stream: false — BlockRun API doesn't support streaming yet
-      // ClawRouter handles SSE heartbeat simulation for upstream compatibility
+      // Force stream: false — IgniteRouter API doesn't support streaming yet
+      // IgniteRouter handles SSE heartbeat simulation for upstream compatibility
       if (parsed.stream === true) {
         parsed.stream = false;
         bodyModified = true;
@@ -2993,13 +3033,13 @@ async function proxyRequest(
 
       // Extract routing profile type (free/eco/auto/premium)
       if (isRoutingProfile) {
-        const profileName = resolvedModel.replace("blockrun/", "");
+        const profileName = resolvedModel.replace("IgniteRouter/", "");
         routingProfile = profileName as "eco" | "auto" | "premium";
       }
 
       // Debug: log received model name
       console.log(
-        `[ClawRouter] Received model: "${parsed.model}" -> normalized: "${normalizedModel}"${wasAlias ? ` -> alias: "${resolvedModel}"` : ""}${routingProfile ? `, profile: ${routingProfile}` : ""}`,
+        `[IgniteRouter] Received model: "${parsed.model}" -> normalized: "${normalizedModel}"${wasAlias ? ` -> alias: "${resolvedModel}"` : ""}${routingProfile ? `, profile: ${routingProfile}` : ""}`,
       );
 
       // For explicit model requests, always canonicalize the model ID before upstream calls.
@@ -3046,7 +3086,7 @@ async function proxyRequest(
           hasTools = Array.isArray(tools) && tools.length > 0;
 
           if (hasTools && tools) {
-            console.log(`[ClawRouter] Tools detected (${tools.length}), forcing agentic tiers`);
+            proxyLog.info(` Tools detected (${tools.length}), forcing agentic tiers`);
           }
 
           // Vision detection: scan messages for image_url content parts
@@ -3057,10 +3097,10 @@ async function proxyRequest(
             return false;
           });
           if (hasVision) {
-            console.log(`[ClawRouter] Vision content detected, filtering to vision-capable models`);
+            proxyLog.info(` Vision content detected, filtering to vision-capable models`);
           }
 
-          // Always route based on current request content (ClawRouter fallback)
+          // Always route based on current request content (IgniteRouter fallback)
           routingDecision = route(prompt, systemPrompt, maxTokens, {
             ...routerOpts,
             routingProfile: routingProfile ?? undefined,
@@ -3073,7 +3113,7 @@ async function proxyRequest(
           // tool schemas (gemini-flash-lite, deepseek) or lack tool support entirely.
           if (hasTools && routingDecision.tier === "SIMPLE") {
             console.log(
-              `[ClawRouter] SIMPLE+tools: keeping agentic model ${routingDecision.model} (tools need reliable function-call support)`,
+              `[IgniteRouter] SIMPLE+tools: keeping agentic model ${routingDecision.model} (tools need reliable function-call support)`,
             );
           }
 
@@ -3094,7 +3134,7 @@ async function proxyRequest(
             if (newRank > existingRank) {
               // Current request needs higher capability — upgrade the session
               console.log(
-                `[ClawRouter] Session ${effectiveSessionId?.slice(0, 8)}... upgrading: ${existingSession.tier} → ${routingDecision.tier} (${routingDecision.model})`,
+                `[IgniteRouter] Session ${effectiveSessionId?.slice(0, 8)}... upgrading: ${existingSession.tier} → ${routingDecision.tier} (${routingDecision.model})`,
               );
               parsed.model = routingDecision.model;
               modelId = routingDecision.model;
@@ -3111,7 +3151,7 @@ async function proxyRequest(
               // e.g. "你好" or "thanks" after a complex task should not inherit the
               // expensive session model or recount all context tokens on a paid model.
               console.log(
-                `[ClawRouter] Session ${effectiveSessionId?.slice(0, 8)}... SIMPLE follow-up, using cheap model: ${routingDecision.model} (bypassing pinned ${existingSession.tier})`,
+                `[IgniteRouter] Session ${effectiveSessionId?.slice(0, 8)}... SIMPLE follow-up, using cheap model: ${routingDecision.model} (bypassing pinned ${existingSession.tier})`,
               );
               parsed.model = routingDecision.model;
               modelId = routingDecision.model;
@@ -3121,7 +3161,7 @@ async function proxyRequest(
             } else {
               // Keep existing higher-tier model (prevent downgrade mid-task)
               console.log(
-                `[ClawRouter] Session ${effectiveSessionId?.slice(0, 8)}... keeping pinned model: ${existingSession.model} (${existingSession.tier} >= ${routingDecision.tier})`,
+                `[IgniteRouter] Session ${effectiveSessionId?.slice(0, 8)}... keeping pinned model: ${existingSession.model} (${existingSession.tier} >= ${routingDecision.tier})`,
               );
               parsed.model = existingSession.model;
               modelId = existingSession.model;
@@ -3159,7 +3199,7 @@ async function proxyRequest(
               );
               if (escalation) {
                 console.log(
-                  `[ClawRouter] ⚡ 3-strike escalation: ${existingSession.model} → ${escalation.model} (${existingSession.tier} → ${escalation.tier})`,
+                  `[IgniteRouter] ⚡ 3-strike escalation: ${existingSession.model} → ${escalation.model} (${existingSession.tier} → ${escalation.tier})`,
                 );
                 parsed.model = escalation.model;
                 modelId = escalation.model;
@@ -3182,7 +3222,7 @@ async function proxyRequest(
                 routingDecision.tier,
               );
               console.log(
-                `[ClawRouter] Session ${effectiveSessionId.slice(0, 8)}... pinned to model: ${routingDecision.model}`,
+                `[IgniteRouter] Session ${effectiveSessionId.slice(0, 8)}... pinned to model: ${routingDecision.model}`,
               );
             }
           }
@@ -3209,8 +3249,8 @@ async function proxyRequest(
     } catch (err) {
       // Log routing errors so they're not silently swallowed
       const errorMsg = err instanceof Error ? err.message : String(err);
-      console.error(`[ClawRouter] Routing error: ${errorMsg}`);
-      console.error(`[ClawRouter] Need help? Run: npx @blockrun/clawrouter doctor`);
+      proxyLog.error(` Routing error: ${errorMsg}`);
+      proxyLog.error(` Need help? Run: npx @igniterouter/igniterouter doctor`);
       options.onError?.(new Error(`Routing failed: ${errorMsg}`));
     }
   }
@@ -3224,7 +3264,7 @@ async function proxyRequest(
   if (autoCompress && requestSizeKB > compressionThreshold) {
     try {
       console.log(
-        `[ClawRouter] Request size ${requestSizeKB}KB exceeds threshold ${compressionThreshold}KB, applying compression...`,
+        `[IgniteRouter] Request size ${requestSizeKB}KB exceeds threshold ${compressionThreshold}KB, applying compression...`,
       );
 
       // Parse messages for compression
@@ -3258,7 +3298,7 @@ async function proxyRequest(
         const savings = (((requestSizeKB - compressedSizeKB) / requestSizeKB) * 100).toFixed(1);
 
         console.log(
-          `[ClawRouter] Compressed ${requestSizeKB}KB → ${compressedSizeKB}KB (${savings}% reduction)`,
+          `[IgniteRouter] Compressed ${requestSizeKB}KB → ${compressedSizeKB}KB (${savings}% reduction)`,
         );
 
         // Update request body with compressed messages
@@ -3268,7 +3308,7 @@ async function proxyRequest(
     } catch (err) {
       // Compression failed - continue with original request
       console.warn(
-        `[ClawRouter] Compression failed: ${err instanceof Error ? err.message : String(err)}`,
+        `[IgniteRouter] Compression failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
@@ -3282,7 +3322,7 @@ async function proxyRequest(
   if (responseCache.shouldCache(body, reqHeaders)) {
     const cachedResponse = responseCache.get(cacheKey);
     if (cachedResponse) {
-      console.log(`[ClawRouter] Cache HIT for ${cachedResponse.model} (saved API call)`);
+      proxyLog.info(` Cache HIT for ${cachedResponse.model} (saved API call)`);
       res.writeHead(cachedResponse.status, cachedResponse.headers);
       res.end(cachedResponse.body);
       return;
@@ -3340,16 +3380,16 @@ async function proxyRequest(
     const projectedCostUsd = runCostUsd + thisReqEstUsd;
     if (projectedCostUsd > options.maxCostPerRunUsd) {
       console.log(
-        `[ClawRouter] Cost cap exceeded for session ${effectiveSessionId.slice(0, 8)}...: projected $${projectedCostUsd.toFixed(4)} (spent $${runCostUsd.toFixed(4)} + est $${thisReqEstUsd.toFixed(4)}) > $${options.maxCostPerRunUsd} limit`,
+        `[IgniteRouter] Cost cap exceeded for session ${effectiveSessionId.slice(0, 8)}...: projected $${projectedCostUsd.toFixed(4)} (spent $${runCostUsd.toFixed(4)} + est $${thisReqEstUsd.toFixed(4)}) > $${options.maxCostPerRunUsd} limit`,
       );
       res.writeHead(429, {
         "Content-Type": "application/json",
-        "X-ClawRouter-Cost-Cap-Exceeded": "1",
+        "X-IgniteRouter-Cost-Cap-Exceeded": "1",
       });
       res.end(
         JSON.stringify({
           error: {
-            message: `ClawRouter cost cap exceeded: projected spend $${projectedCostUsd.toFixed(4)} (spent $${runCostUsd.toFixed(4)} + est $${thisReqEstUsd.toFixed(4)}) would exceed limit $${options.maxCostPerRunUsd}`,
+            message: `IgniteRouter cost cap exceeded: projected spend $${projectedCostUsd.toFixed(4)} (spent $${runCostUsd.toFixed(4)} + est $${thisReqEstUsd.toFixed(4)}) would exceed limit $${options.maxCostPerRunUsd}`,
             type: "cost_cap_exceeded",
             code: "cost_cap_exceeded",
           },
@@ -3382,24 +3422,24 @@ async function proxyRequest(
     if (isComplexOrAgentic) {
       // Case A: tool/complex/agentic routing profile — check global model table
       // Intentionally exclude free models: they cannot handle complex/agentic tasks.
-      const canAffordAnyNonFreeModel = BLOCKRUN_MODELS.some((m) => {
+      const canAffordAnyNonFreeModel = IgniteRouter_MODELS.some((m) => {
         if (FREE_MODELS.has(m.id)) return false;
         const est = estimateAmount(m.id, body.length, maxTokens);
         return est !== undefined && Number(est) / 1_000_000 <= remainingUsd;
       });
       if (!canAffordAnyNonFreeModel) {
         console.log(
-          `[ClawRouter] Budget insufficient for agentic/complex session ${effectiveSessionId.slice(0, 8)}...: $${Math.max(0, remainingUsd).toFixed(4)} remaining — blocking (silent downgrade would corrupt tool/complex responses)`,
+          `[IgniteRouter] Budget insufficient for agentic/complex session ${effectiveSessionId.slice(0, 8)}...: $${Math.max(0, remainingUsd).toFixed(4)} remaining — blocking (silent downgrade would corrupt tool/complex responses)`,
         );
         res.writeHead(429, {
           "Content-Type": "application/json",
-          "X-ClawRouter-Cost-Cap-Exceeded": "1",
-          "X-ClawRouter-Budget-Mode": "blocked",
+          "X-IgniteRouter-Cost-Cap-Exceeded": "1",
+          "X-IgniteRouter-Budget-Mode": "blocked",
         });
         res.end(
           JSON.stringify({
             error: {
-              message: `ClawRouter budget exhausted: $${Math.max(0, remainingUsd).toFixed(4)} remaining (limit: $${options.maxCostPerRunUsd}). Increase maxCostPerRun to continue.`,
+              message: `IgniteRouter budget exhausted: $${Math.max(0, remainingUsd).toFixed(4)} remaining (limit: $${options.maxCostPerRunUsd}). Increase maxCostPerRun to continue.`,
               type: "cost_cap_exceeded",
               code: "budget_exhausted",
             },
@@ -3415,17 +3455,17 @@ async function proxyRequest(
       const canAfford = !est || Number(est) / 1_000_000 <= remainingUsd;
       if (!canAfford) {
         console.log(
-          `[ClawRouter] Budget insufficient for explicit model ${modelId} in session ${effectiveSessionId.slice(0, 8)}...: $${Math.max(0, remainingUsd).toFixed(4)} remaining — blocking (user explicitly chose ${modelId})`,
+          `[IgniteRouter] Budget insufficient for explicit model ${modelId} in session ${effectiveSessionId.slice(0, 8)}...: $${Math.max(0, remainingUsd).toFixed(4)} remaining — blocking (user explicitly chose ${modelId})`,
         );
         res.writeHead(429, {
           "Content-Type": "application/json",
-          "X-ClawRouter-Cost-Cap-Exceeded": "1",
-          "X-ClawRouter-Budget-Mode": "blocked",
+          "X-IgniteRouter-Cost-Cap-Exceeded": "1",
+          "X-IgniteRouter-Budget-Mode": "blocked",
         });
         res.end(
           JSON.stringify({
             error: {
-              message: `ClawRouter budget exhausted: $${Math.max(0, remainingUsd).toFixed(4)} remaining (limit: $${options.maxCostPerRunUsd}). Increase maxCostPerRun to continue using ${modelId}.`,
+              message: `IgniteRouter budget exhausted: $${Math.max(0, remainingUsd).toFixed(4)} remaining (limit: $${options.maxCostPerRunUsd}). Increase maxCostPerRun to continue using ${modelId}.`,
               type: "cost_cap_exceeded",
               code: "budget_exhausted",
             },
@@ -3535,7 +3575,7 @@ async function proxyRequest(
       const contextExcluded = fullChain.filter((m) => !contextFiltered.includes(m));
       if (contextExcluded.length > 0) {
         console.log(
-          `[ClawRouter] Context filter (~${estimatedTotalTokens} tokens): excluded ${contextExcluded.join(", ")}`,
+          `[IgniteRouter] Context filter (~${estimatedTotalTokens} tokens): excluded ${contextExcluded.join(", ")}`,
         );
       }
 
@@ -3544,7 +3584,7 @@ async function proxyRequest(
       const excludeExcluded = contextFiltered.filter((m) => !excludeFiltered.includes(m));
       if (excludeExcluded.length > 0) {
         console.log(
-          `[ClawRouter] Exclude filter: excluded ${excludeExcluded.join(", ")} (user preference)`,
+          `[IgniteRouter] Exclude filter: excluded ${excludeExcluded.join(", ")} (user preference)`,
         );
       }
 
@@ -3555,7 +3595,7 @@ async function proxyRequest(
       const toolExcluded = excludeFiltered.filter((m) => !toolFiltered.includes(m));
       if (toolExcluded.length > 0) {
         console.log(
-          `[ClawRouter] Tool-calling filter: excluded ${toolExcluded.join(", ")} (no structured function call support)`,
+          `[IgniteRouter] Tool-calling filter: excluded ${toolExcluded.join(", ")} (no structured function call support)`,
         );
       }
 
@@ -3572,7 +3612,7 @@ async function proxyRequest(
         if (compliant.length > 0 && compliant.length < toolFiltered.length) {
           const dropped = toolFiltered.filter((m) => TOOL_NONCOMPLIANT_MODELS.includes(m));
           console.log(
-            `[ClawRouter] Tool-compliance filter: excluded ${dropped.join(", ")} (unreliable tool schema handling)`,
+            `[IgniteRouter] Tool-compliance filter: excluded ${dropped.join(", ")} (unreliable tool schema handling)`,
           );
           toolFiltered = compliant;
         }
@@ -3583,7 +3623,7 @@ async function proxyRequest(
       const visionExcluded = toolFiltered.filter((m) => !visionFiltered.includes(m));
       if (visionExcluded.length > 0) {
         console.log(
-          `[ClawRouter] Vision filter: excluded ${visionExcluded.join(", ")} (no vision support)`,
+          `[IgniteRouter] Vision filter: excluded ${visionExcluded.join(", ")} (no vision support)`,
         );
       }
 
@@ -3645,11 +3685,11 @@ async function proxyRequest(
       if (isComplexOrAgenticFilter && filteredToFreeOnly) {
         const budgetSummary = `$${Math.max(0, remainingUsd).toFixed(4)} remaining (limit: $${options.maxCostPerRunUsd})`;
         console.log(
-          `[ClawRouter] Budget filter left only free model for complex/agentic session — blocking (${budgetSummary})`,
+          `[IgniteRouter] Budget filter left only free model for complex/agentic session — blocking (${budgetSummary})`,
         );
         const errPayload = JSON.stringify({
           error: {
-            message: `ClawRouter budget exhausted: remaining budget (${budgetSummary}) cannot support a complex/tool request. Increase maxCostPerRun to continue.`,
+            message: `IgniteRouter budget exhausted: remaining budget (${budgetSummary}) cannot support a complex/tool request. Increase maxCostPerRun to continue.`,
             type: "cost_cap_exceeded",
             code: "budget_exhausted",
           },
@@ -3662,8 +3702,8 @@ async function proxyRequest(
         } else {
           res.writeHead(429, {
             "Content-Type": "application/json",
-            "X-ClawRouter-Cost-Cap-Exceeded": "1",
-            "X-ClawRouter-Budget-Mode": "blocked",
+            "X-IgniteRouter-Cost-Cap-Exceeded": "1",
+            "X-IgniteRouter-Budget-Mode": "blocked",
           });
           res.end(errPayload);
         }
@@ -3677,7 +3717,7 @@ async function proxyRequest(
             ? `$${remainingUsd.toFixed(4)} remaining`
             : `budget exhausted ($${runCostUsd.toFixed(4)}/$${options.maxCostPerRunUsd})`;
         console.log(
-          `[ClawRouter] Budget downgrade (${budgetSummary}): excluded ${excluded.join(", ")}`,
+          `[IgniteRouter] Budget downgrade (${budgetSummary}): excluded ${excluded.join(", ")}`,
         );
 
         // A: Set visible warning notice — prepended to response so user sees the downgrade
@@ -3709,7 +3749,7 @@ async function proxyRequest(
         throw new Error(`Request timed out after ${timeoutMs}ms`);
       }
 
-      console.log(`[ClawRouter] Trying model ${i + 1}/${modelsToTry.length}: ${tryModel}`);
+      proxyLog.info(` Trying model ${i + 1}/${modelsToTry.length}: ${tryModel}`);
 
       // Per-model abort controller — each model attempt gets its own 60s window.
       // When it fires, the fallback loop moves to the next model rather than failing.
@@ -3736,7 +3776,7 @@ async function proxyRequest(
       // If the per-model timeout fired (but not global), treat as fallback-worthy error
       if (!result.success && modelController.signal.aborted && !isLastAttempt) {
         console.log(
-          `[ClawRouter] Model ${tryModel} timed out after ${PER_MODEL_TIMEOUT_MS}ms, trying fallback`,
+          `[IgniteRouter] Model ${tryModel} timed out after ${PER_MODEL_TIMEOUT_MS}ms, trying fallback`,
         );
         recordProviderError(tryModel, "server_error");
         continue;
@@ -3745,7 +3785,7 @@ async function proxyRequest(
       if (result.success && result.response) {
         upstream = result.response;
         actualModelUsed = tryModel;
-        console.log(`[ClawRouter] Success with model: ${tryModel}`);
+        proxyLog.info(` Success with model: ${tryModel}`);
         // Accumulate estimated cost to session for maxCostPerRun tracking
         if (options.maxCostPerRunUsd && effectiveSessionId && !FREE_MODELS.has(tryModel)) {
           const costEst = estimateAmount(tryModel, body.length, maxTokens);
@@ -3784,14 +3824,14 @@ async function proxyRequest(
         });
         const freeIdx = modelsToTry.indexOf(FREE_MODEL);
         if (freeIdx > i + 1) {
-          console.log(`[ClawRouter] Payment error — skipping to free model: ${FREE_MODEL}`);
+          proxyLog.info(` Payment error — skipping to free model: ${FREE_MODEL}`);
           i = freeIdx - 1; // loop will increment to freeIdx
           continue;
         }
         // Free model not in chain — add it and try
         if (freeIdx === -1) {
           modelsToTry.push(FREE_MODEL);
-          console.log(`[ClawRouter] Payment error — appending free model: ${FREE_MODEL}`);
+          proxyLog.info(` Payment error — appending free model: ${FREE_MODEL}`);
           continue;
         }
       }
@@ -3803,7 +3843,7 @@ async function proxyRequest(
           isExplicitModelError && /unknown.*model|invalid.*model/i.test(result.errorBody || "");
         if (isUnknownExplicitModel) {
           console.log(
-            `[ClawRouter] Explicit model error from ${tryModel}, not falling back: ${result.errorBody?.slice(0, 100)}`,
+            `[IgniteRouter] Explicit model error from ${tryModel}, not falling back: ${result.errorBody?.slice(0, 100)}`,
           );
           break;
         }
@@ -3820,7 +3860,7 @@ async function proxyRequest(
           // Retry once after 200ms before treating this as a model-level failure.
           if (!isLastAttempt && !globalController.signal.aborted) {
             console.log(
-              `[ClawRouter] Rate-limited on ${tryModel}, retrying in 200ms before failover`,
+              `[IgniteRouter] Rate-limited on ${tryModel}, retrying in 200ms before failover`,
             );
             await new Promise<void>((resolve) => setTimeout(resolve, 200));
             if (!globalController.signal.aborted) {
@@ -3846,7 +3886,7 @@ async function proxyRequest(
               if (retryResult.success && retryResult.response) {
                 upstream = retryResult.response;
                 actualModelUsed = tryModel;
-                console.log(`[ClawRouter] Rate-limit retry succeeded for: ${tryModel}`);
+                proxyLog.info(` Rate-limit retry succeeded for: ${tryModel}`);
                 if (options.maxCostPerRunUsd && effectiveSessionId && tryModel !== FREE_MODEL) {
                   const costEst = estimateAmount(tryModel, body.length, maxTokens);
                   if (costEst) {
@@ -3865,10 +3905,10 @@ async function proxyRequest(
             if (parsed.update_available) {
               console.log("");
               console.log(
-                `\x1b[33m⬆️  ClawRouter ${parsed.update_available} available (you have ${VERSION})\x1b[0m`,
+                `\x1b[33m⬆️  IgniteRouter ${parsed.update_available} available (you have ${VERSION})\x1b[0m`,
               );
               console.log(
-                `   Run: \x1b[36mcurl -fsSL ${parsed.update_url || "https://blockrun.ai/ClawRouter-update"} | bash\x1b[0m`,
+                `   Run: \x1b[36mcurl -fsSL ${parsed.update_url || "https://IgniteRouter.ai/IgniteRouter-update"} | bash\x1b[0m`,
               );
               console.log("");
             }
@@ -3879,12 +3919,12 @@ async function proxyRequest(
           markOverloaded(tryModel);
         } else if (errorCat === "auth_failure" || errorCat === "quota_exceeded") {
           console.log(
-            `[ClawRouter] 🔑 ${errorCat === "auth_failure" ? "Auth failure" : "Quota exceeded"} for ${tryModel} — check provider config`,
+            `[IgniteRouter] 🔑 ${errorCat === "auth_failure" ? "Auth failure" : "Quota exceeded"} for ${tryModel} — check provider config`,
           );
         }
 
         console.log(
-          `[ClawRouter] Provider error from ${tryModel}, trying fallback: ${result.errorBody?.slice(0, 100)}`,
+          `[IgniteRouter] Provider error from ${tryModel}, trying fallback: ${result.errorBody?.slice(0, 100)}`,
         );
         continue;
       }
@@ -3892,7 +3932,7 @@ async function proxyRequest(
       // Not a provider error or last attempt — stop trying
       if (!result.isProviderError) {
         console.log(
-          `[ClawRouter] Non-provider error from ${tryModel}, not retrying: ${result.errorBody?.slice(0, 100)}`,
+          `[IgniteRouter] Non-provider error from ${tryModel}, not retrying: ${result.errorBody?.slice(0, 100)}`,
         );
       }
       break;
@@ -3907,11 +3947,11 @@ async function proxyRequest(
       heartbeatInterval = undefined;
     }
 
-    // --- Emit routing debug info (opt-in via x-clawrouter-debug: true header) ---
+    // --- Emit routing debug info (opt-in via x-IgniteRouter-debug: true header) ---
     // For streaming: SSE comment (invisible to most clients, visible in raw stream)
     // For non-streaming: response headers added later
     if (debugMode && headersSentEarly && routingDecision) {
-      const debugComment = `: x-clawrouter-debug profile=${routingProfile ?? "auto"} tier=${routingDecision.tier} model=${actualModelUsed} agentic=${routingDecision.agenticScore?.toFixed(2) ?? "n/a"} confidence=${routingDecision.confidence.toFixed(2)} reasoning=${routingDecision.reasoning}\n\n`;
+      const debugComment = `: x-IgniteRouter-debug profile=${routingProfile ?? "auto"} tier=${routingDecision.tier} model=${actualModelUsed} agentic=${routingDecision.agenticScore?.toFixed(2) ?? "n/a"} confidence=${routingDecision.confidence.toFixed(2)} reasoning=${routingDecision.reasoning}\n\n`;
       safeWrite(res, debugComment);
     }
 
@@ -3942,7 +3982,7 @@ async function proxyRequest(
       if (effectiveSessionId) {
         sessionStore.setSession(effectiveSessionId, actualModelUsed, routingDecision.tier);
         console.log(
-          `[ClawRouter] Session ${effectiveSessionId.slice(0, 8)}... updated pin to fallback: ${actualModelUsed}`,
+          `[IgniteRouter] Session ${effectiveSessionId.slice(0, 8)}... updated pin to fallback: ${actualModelUsed}`,
         );
       }
     }
@@ -3958,7 +3998,7 @@ async function proxyRequest(
         failedAttempts.length > 0
           ? `All ${failedAttempts.length} models failed. Tried: ${attemptSummary}`
           : "All models in fallback chain failed";
-      console.log(`[ClawRouter] ${structuredMessage}`);
+      proxyLog.info(` ${structuredMessage}`);
       const rawErrBody = lastError?.body || structuredMessage;
       const errStatus = lastError?.status || 502;
 
@@ -4046,7 +4086,7 @@ async function proxyRequest(
       // (non-200 responses are handled in the fallback loop above)
 
       // Convert non-streaming JSON response to SSE streaming format for client
-      // (BlockRun API returns JSON since we forced stream:false)
+      // (IgniteRouter API returns JSON since we forced stream:false)
       // OpenClaw expects: object="chat.completion.chunk" with choices[].delta (not message)
       // We emit proper incremental deltas to match OpenAI's streaming format exactly
       if (upstream.body) {
@@ -4262,22 +4302,22 @@ async function proxyRequest(
       responseHeaders["x-context-used-kb"] = String(originalContextSizeKB);
       responseHeaders["x-context-limit-kb"] = String(CONTEXT_LIMIT_KB);
 
-      // Add routing debug headers (opt-in via x-clawrouter-debug: true header)
+      // Add routing debug headers (opt-in via x-IgniteRouter-debug: true header)
       if (debugMode && routingDecision) {
-        responseHeaders["x-clawrouter-profile"] = routingProfile ?? "auto";
-        responseHeaders["x-clawrouter-tier"] = routingDecision.tier;
-        responseHeaders["x-clawrouter-model"] = actualModelUsed;
-        responseHeaders["x-clawrouter-confidence"] = routingDecision.confidence.toFixed(2);
-        responseHeaders["x-clawrouter-reasoning"] = routingDecision.reasoning;
+        responseHeaders["x-IgniteRouter-profile"] = routingProfile ?? "auto";
+        responseHeaders["x-IgniteRouter-tier"] = routingDecision.tier;
+        responseHeaders["x-IgniteRouter-model"] = actualModelUsed;
+        responseHeaders["x-IgniteRouter-confidence"] = routingDecision.confidence.toFixed(2);
+        responseHeaders["x-IgniteRouter-reasoning"] = routingDecision.reasoning;
         if (routingDecision.agenticScore !== undefined) {
-          responseHeaders["x-clawrouter-agentic-score"] = routingDecision.agenticScore.toFixed(2);
+          responseHeaders["x-IgniteRouter-agentic-score"] = routingDecision.agenticScore.toFixed(2);
         }
       }
 
       // Always include cost visibility headers when routing is active
       if (routingDecision) {
-        responseHeaders["x-clawrouter-cost"] = routingDecision.costEstimate.toFixed(6);
-        responseHeaders["x-clawrouter-savings"] = `${(routingDecision.savings * 100).toFixed(0)}%`;
+        responseHeaders["x-IgniteRouter-cost"] = routingDecision.costEstimate.toFixed(6);
+        responseHeaders["x-IgniteRouter-savings"] = `${(routingDecision.savings * 100).toFixed(0)}%`;
       }
 
       // Collect full body for possible notice injection
@@ -4358,8 +4398,8 @@ async function proxyRequest(
 
       // B: Add budget downgrade headers for orchestration layers
       if (budgetDowngradeHeaderMode) {
-        responseHeaders["x-clawrouter-budget-downgrade"] = "1";
-        responseHeaders["x-clawrouter-budget-mode"] = budgetDowngradeHeaderMode;
+        responseHeaders["x-IgniteRouter-budget-downgrade"] = "1";
+        responseHeaders["x-IgniteRouter-budget-mode"] = budgetDowngradeHeaderMode;
         budgetDowngradeHeaderMode = undefined;
       }
 
@@ -4387,7 +4427,7 @@ async function proxyRequest(
           model: actualModelUsed,
         });
         console.log(
-          `[ClawRouter] Cached response for ${actualModelUsed} (${responseBody.length} bytes)`,
+          `[IgniteRouter] Cached response for ${actualModelUsed} (${responseBody.length} bytes)`,
         );
       }
 
@@ -4417,7 +4457,7 @@ async function proxyRequest(
       if (events.length > 0) {
         sessionJournal.record(sessionId, events, actualModelUsed);
         console.log(
-          `[ClawRouter] Recorded ${events.length} events to session journal for session ${sessionId.slice(0, 8)}...`,
+          `[IgniteRouter] Recorded ${events.length} events to session journal for session ${sessionId.slice(0, 8)}...`,
         );
       }
     }
@@ -4475,3 +4515,4 @@ async function proxyRequest(
     logUsage(entry).catch(() => {});
   }
 }
+

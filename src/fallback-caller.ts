@@ -1,5 +1,6 @@
 import { RankedCandidate } from "./priority-selector.js";
 import { UserProvider } from "./user-providers.js";
+import { fallbackLog } from "./logger.js";
 
 export type FailureReason =
   | "rate-limit"
@@ -58,11 +59,14 @@ export async function callWithFallback(
 
   const attempts: AttemptResult[] = [];
 
-  for (const candidate of candidates) {
+  for (let i = 0; i < candidates.length; i++) {
+    const candidate = candidates[i];
+    const attemptNumber = i + 1;
     const startTime = Date.now();
 
     try {
       const { url, init } = buildRequest(candidate.provider);
+      fallbackLog.debug("Trying provider", { model: candidate.provider.id, attempt: attemptNumber });
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -94,6 +98,8 @@ export async function callWithFallback(
           latencyMs,
         });
 
+        fallbackLog.info("Provider succeeded", { model: candidate.provider.id, latencyMs });
+
         return {
           success: true,
           attempts,
@@ -104,6 +110,12 @@ export async function callWithFallback(
 
       const body = await response.text().catch(() => "");
       const reason = classifyHttpError(response.status, body);
+      fallbackLog.warn("Provider failed", { 
+        model: candidate.provider.id, 
+        reason, 
+        status: response.status,
+        latencyMs 
+      });
 
       if (reason === "bad-request") {
         attempts.push({
@@ -143,6 +155,13 @@ export async function callWithFallback(
         reason = "timeout";
       }
 
+      fallbackLog.warn("Provider failed", { 
+        model: candidate.provider.id, 
+        reason, 
+        errorMessage: error.message,
+        latencyMs 
+      });
+
       attempts.push({
         provider: candidate.provider,
         success: false,
@@ -153,6 +172,7 @@ export async function callWithFallback(
     }
   }
 
+  fallbackLog.error("All providers exhausted", { tried: attempts.length });
   return {
     success: false,
     attempts,

@@ -2,7 +2,7 @@
  * Dictionary Codebook
  *
  * Static dictionary of frequently repeated phrases observed in LLM prompts.
- * Built from analysis of BlockRun production logs.
+ * Built from analysis of IgniteRouter production logs.
  *
  * Format: Short code ($XX) -> Long phrase
  * The LLM receives a codebook header and decodes in-context.
@@ -75,8 +75,8 @@ export const STATIC_CODEBOOK: Record<string, string> = {
   $E03: "internal APIs",
   $E04: "session cookies",
 
-  // BlockRun model aliases (common in prompts)
-  $M01: "blockrun/",
+  // IgniteRouter model aliases (common in prompts)
+  $M01: "IgniteRouter/",
   $M02: "openai/",
   $M03: "anthropic/",
   $M04: "google/",
@@ -140,3 +140,4 @@ export function decompressContent(
   }
   return result;
 }
+

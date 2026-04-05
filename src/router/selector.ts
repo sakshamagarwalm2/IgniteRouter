@@ -91,9 +91,9 @@ export function getFallbackChain(tier: Tier, tierConfigs: Record<Tier, TierConfi
  * Calculate cost for a specific model (used when fallback model is used).
  * Returns updated cost fields for RoutingDecision.
  */
-// Server-side margin applied to all x402 payments (must match blockrun server's MARGIN_PERCENT)
+// Server-side margin applied to all x402 payments (must match IgniteRouter server's MARGIN_PERCENT)
 const SERVER_MARGIN_PERCENT = 5;
-// Minimum payment enforced by CDP Facilitator (must match blockrun server's MIN_PAYMENT_USD)
+// Minimum payment enforced by CDP Facilitator (must match IgniteRouter server's MIN_PAYMENT_USD)
 const MIN_PAYMENT_USD = 0.001;
 
 export function calculateModelCost(
@@ -221,3 +221,4 @@ export function getFallbackChainFiltered(
 
   return filtered;
 }
+

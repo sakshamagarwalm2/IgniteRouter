@@ -130,11 +130,12 @@ export type RoutingConfig = {
   tiers: Record<Tier, TierConfig>;
   /** Tier configs for agentic mode - models that excel at multi-step tasks */
   agenticTiers?: Record<Tier, TierConfig>;
-  /** Tier configs for eco profile - ultra cost-optimized (blockrun/eco) */
+  /** Tier configs for eco profile - ultra cost-optimized (IgniteRouter/eco) */
   ecoTiers?: Record<Tier, TierConfig>;
-  /** Tier configs for premium profile - best quality (blockrun/premium) */
+  /** Tier configs for premium profile - best quality (IgniteRouter/premium) */
   premiumTiers?: Record<Tier, TierConfig>;
   /** Time-windowed promotions that temporarily override tier routing */
   promotions?: Promotion[];
   overrides: OverridesConfig;
 };
+

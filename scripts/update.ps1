@@ -1,14 +1,14 @@
-# ClawRouter Update Script for Windows (PowerShell)
-# Usage: iwr -useb https://blockrun.ai/ClawRouter-update.ps1 | iex
-#    or: powershell -ExecutionPolicy Bypass -Command "iwr -useb https://blockrun.ai/ClawRouter-update.ps1 | iex"
+# IgniteRouter Update Script for Windows (PowerShell)
+# Usage: iwr -useb https://IgniteRouter.ai/IgniteRouter-update.ps1 | iex
+#    or: powershell -ExecutionPolicy Bypass -Command "iwr -useb https://IgniteRouter.ai/IgniteRouter-update.ps1 | iex"
 #
 # Run as regular user (no admin needed)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$PLUGIN_DIR = "$env:USERPROFILE\.openclaw\extensions\clawrouter"
+$PLUGIN_DIR = "$env:USERPROFILE\.openclaw\extensions\IgniteRouter"
 $CONFIG_PATH = "$env:USERPROFILE\.openclaw\openclaw.json"
-$WALLET_FILE = "$env:USERPROFILE\.openclaw\blockrun\wallet.key"
+$WALLET_FILE = "$env:USERPROFILE\.openclaw\IgniteRouter\wallet.key"
 
 function Write-Ok  { param($msg) Write-Host "  $([char]0x2713) $msg" -ForegroundColor Green }
 function Write-Warn { param($msg) Write-Host "  ! $msg" -ForegroundColor Yellow }
@@ -16,7 +16,7 @@ function Write-Err  { param($msg) Write-Host "  x $msg" -ForegroundColor Red }
 function Write-Step { param($msg) Write-Host "`n-> $msg" }
 
 Write-Host ""
-Write-Host "ClawRouter Update (Windows)" -ForegroundColor Cyan
+Write-Host "IgniteRouter Update (Windows)" -ForegroundColor Cyan
 Write-Host ""
 
 # ── Step 1: Back up wallet ────────────────────────────────────
@@ -54,12 +54,12 @@ if (Test-Path $CONFIG_PATH) {
     try {
         $cfg = Get-Content $CONFIG_PATH -Raw | ConvertFrom-Json
         $changed = $false
-        if ($cfg.plugins -and $cfg.plugins.entries -and $cfg.plugins.entries.PSObject.Properties['clawrouter']) {
-            $cfg.plugins.entries.PSObject.Properties.Remove('clawrouter')
+        if ($cfg.plugins -and $cfg.plugins.entries -and $cfg.plugins.entries.PSObject.Properties['IgniteRouter']) {
+            $cfg.plugins.entries.PSObject.Properties.Remove('IgniteRouter')
             $changed = $true
         }
-        if ($cfg.plugins -and $cfg.plugins.installs -and $cfg.plugins.installs.PSObject.Properties['clawrouter']) {
-            $cfg.plugins.installs.PSObject.Properties.Remove('clawrouter')
+        if ($cfg.plugins -and $cfg.plugins.installs -and $cfg.plugins.installs.PSObject.Properties['IgniteRouter']) {
+            $cfg.plugins.installs.PSObject.Properties.Remove('IgniteRouter')
             $changed = $true
         }
         if ($changed) {
@@ -79,7 +79,7 @@ if (Test-Path $CONFIG_PATH) {
     try {
         $cfg = Get-Content $CONFIG_PATH -Raw | ConvertFrom-Json
         $provider = $null
-        if ($cfg.models -and $cfg.models.providers) { $provider = $cfg.models.providers.blockrun }
+        if ($cfg.models -and $cfg.models.providers) { $provider = $cfg.models.providers.IgniteRouter }
         if ($provider) {
             $changed = $false
             if (-not $provider.baseUrl) { $provider | Add-Member -NotePropertyName baseUrl -NotePropertyValue 'http://127.0.0.1:8402/v1' -Force; $changed = $true; Write-Ok "Fixed missing baseUrl" }
@@ -95,8 +95,8 @@ if (Test-Path $CONFIG_PATH) {
 # ── Step 4: Get latest version from npm ───────────────────────
 Write-Step "Fetching latest version from npm..."
 try {
-    $verFile = Join-Path $env:TEMP "clawrouter-latest-ver.txt"
-    & cmd /c "npm view @blockrun/clawrouter@latest version > `"$verFile`" 2>nul"
+    $verFile = Join-Path $env:TEMP "IgniteRouter-latest-ver.txt"
+    & cmd /c "npm view @igniterouter/igniterouter@latest version > `"$verFile`" 2>nul"
     $LATEST_VERSION = (Get-Content $verFile -ErrorAction Stop).Trim()
     Remove-Item $verFile -ErrorAction SilentlyContinue
     if (-not $LATEST_VERSION -or $LATEST_VERSION -match 'error|ERR') {
@@ -110,14 +110,14 @@ try {
 }
 
 # ── Step 5: Install directly from npm (bypasses openclaw cache) ───
-Write-Step "Downloading ClawRouter v$LATEST_VERSION from npm..."
+Write-Step "Downloading IgniteRouter v$LATEST_VERSION from npm..."
 
-$tmpDir = Join-Path $env:TEMP "clawrouter-install-$(Get-Random)"
+$tmpDir = Join-Path $env:TEMP "IgniteRouter-install-$(Get-Random)"
 New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
 
 try {
     # Run npm pack via cmd.exe to completely bypass PowerShell's stderr-as-error behavior
-    & cmd /c "npm pack `"@blockrun/clawrouter@$LATEST_VERSION`" --pack-destination `"$tmpDir`" --prefer-online >nul 2>nul"
+    & cmd /c "npm pack `"@igniterouter/igniterouter@$LATEST_VERSION`" --pack-destination `"$tmpDir`" --prefer-online >nul 2>nul"
 
     $tarball = Get-ChildItem "$tmpDir\*.tgz" | Select-Object -First 1
     if (-not $tarball) { throw "npm pack produced no tarball in $tmpDir" }
@@ -139,7 +139,7 @@ try {
 
 # ── Step 5b: Install npm dependencies ─────────────────────────
 Write-Step "Installing dependencies (Solana, x402, etc.)..."
-$logFile = Join-Path $env:TEMP "clawrouter-npm-install.log"
+$logFile = Join-Path $env:TEMP "IgniteRouter-npm-install.log"
 & cmd /c "cd /d `"$PLUGIN_DIR`" && npm install --omit=dev > `"$logFile`" 2>&1"
 if ($LASTEXITCODE -ne 0) {
     Write-Err "npm install failed. Log: $logFile"
@@ -156,11 +156,11 @@ if (Test-Path $CONFIG_PATH) {
         if (-not $cfg.plugins) { $cfg | Add-Member -NotePropertyName plugins -NotePropertyValue ([PSCustomObject]@{}) -Force }
         if (-not $cfg.plugins.allow) { $cfg.plugins | Add-Member -NotePropertyName allow -NotePropertyValue @() -Force }
         $allow = [System.Collections.Generic.List[string]]$cfg.plugins.allow
-        if (-not $allow.Contains('clawrouter')) {
-            $allow.Add('clawrouter')
+        if (-not $allow.Contains('IgniteRouter')) {
+            $allow.Add('IgniteRouter')
             $cfg.plugins.allow = $allow.ToArray()
             $cfg | ConvertTo-Json -Depth 20 | Set-Content $CONFIG_PATH -Encoding UTF8
-            Write-Ok "Added clawrouter to plugins.allow"
+            Write-Ok "Added IgniteRouter to plugins.allow"
         } else {
             Write-Ok "Plugin already in allow list"
         }
@@ -178,9 +178,9 @@ $store = [PSCustomObject]@{ version = 1; profiles = [PSCustomObject]@{} }
 if (Test-Path $authPath) {
     try { $store = Get-Content $authPath -Raw | ConvertFrom-Json } catch {}
 }
-if (-not $store.profiles.PSObject.Properties['blockrun:default']) {
-    $store.profiles | Add-Member -NotePropertyName 'blockrun:default' `
-        -NotePropertyValue ([PSCustomObject]@{ type = 'api_key'; provider = 'blockrun'; key = 'x402-proxy-handles-auth' }) -Force
+if (-not $store.profiles.PSObject.Properties['IgniteRouter:default']) {
+    $store.profiles | Add-Member -NotePropertyName 'IgniteRouter:default' `
+        -NotePropertyValue ([PSCustomObject]@{ type = 'api_key'; provider = 'IgniteRouter'; key = 'x402-proxy-handles-auth' }) -Force
     $store | ConvertTo-Json -Depth 10 | Set-Content $authPath -Encoding UTF8
     Write-Ok "Auth profile created"
 } else {
@@ -219,9 +219,10 @@ if (Test-Path $WALLET_FILE) {
 
 # ── Done ──────────────────────────────────────────────────────
 Write-Host ""
-Write-Host "ClawRouter v$LATEST_VERSION installed successfully!" -ForegroundColor Green
+Write-Host "IgniteRouter v$LATEST_VERSION installed successfully!" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Run: openclaw gateway restart" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  To verify: npx @blockrun/clawrouter doctor"
+Write-Host "  To verify: npx @igniterouter/igniterouter doctor"
 Write-Host ""
+

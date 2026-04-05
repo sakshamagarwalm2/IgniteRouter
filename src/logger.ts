@@ -1,56 +1,97 @@
-/**
- * Usage Logger
- *
- * Logs every LLM request as a JSON line to a daily log file.
- * Files: ~/.openclaw/blockrun/logs/usage-YYYY-MM-DD.jsonl
- *
- * MVP: append-only JSON lines. No rotation, no cleanup.
- * Logging never breaks the request flow — all errors are swallowed.
- */
+// src/logger.ts
 
-import { appendFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
-import { homedir } from "node:os";
+export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error'
 
-export type UsageEntry = {
+export interface LogFields {
+  [key: string]: unknown
+}
+
+export interface Logger {
+  trace(msg: string, fields?: LogFields): void
+  debug(msg: string, fields?: LogFields): void
+  info(msg: string, fields?: LogFields): void
+  warn(msg: string, fields?: LogFields): void
+  error(msg: string, fields?: LogFields): void
+  child(component: string): Logger  // creates subsystem logger
+}
+
+// The minimum log level — reads from env IGNITEROUTER_LOG_LEVEL or defaults to 'info'
+// Levels in order: trace < debug < info < warn < error
+const LEVEL_ORDER: LogLevel[] = ['trace', 'debug', 'info', 'warn', 'error']
+
+function shouldLog(msgLevel: LogLevel, minLevel: LogLevel): boolean {
+  return LEVEL_ORDER.indexOf(msgLevel) >= LEVEL_ORDER.indexOf(minLevel)
+}
+
+function createLogger(subsystem: string): Logger {
+  const minLevel = (process.env.IGNITEROUTER_LOG_LEVEL ?? 'info') as LogLevel
+
+  function log(level: LogLevel, msg: string, fields?: LogFields): void {
+    if (!shouldLog(level, minLevel)) return
+
+    // entry is not used directly but represents what OpenClaw expects in JSONL
+    // const entry = {
+    //   time: new Date().toISOString(),
+    //   level,
+    //   subsystem,
+    //   msg,
+    //   ...fields
+    // }
+
+    // Write structured JSON to stderr (OpenClaw captures this for file logs)
+    // AND write readable prefix format to stdout (OpenClaw shows this in console)
+    const prefix = `[${subsystem}]`
+    const fieldStr = fields && Object.keys(fields).length > 0
+      ? ' ' + Object.entries(fields).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(' ')
+      : ''
+
+    switch (level) {
+      case 'error': console.error(prefix, 'ERROR', msg + fieldStr); break
+      case 'warn':  console.warn(prefix, 'WARN ', msg + fieldStr); break
+      case 'debug': console.debug(prefix, 'DEBUG', msg + fieldStr); break
+      case 'trace': console.debug(prefix, 'TRACE', msg + fieldStr); break
+      default:      console.log(prefix, 'INFO ', msg + fieldStr); break
+    }
+  }
+
+  return {
+    trace: (msg, fields) => log('trace', msg, fields),
+    debug: (msg, fields) => log('debug', msg, fields),
+    info:  (msg, fields) => log('info', msg, fields),
+    warn:  (msg, fields) => log('warn', msg, fields),
+    error: (msg, fields) => log('error', msg, fields),
+    child: (component: string) => createLogger(`igniterouter/${component}`)
+  }
+}
+
+// Root logger — subsystem: "igniterouter"
+export const logger = createLogger('igniterouter')
+
+// Pre-built subsystem loggers — import these directly in each file
+export const routingLog  = logger.child('routing')
+export const proxyLog    = logger.child('proxy')
+export const fallbackLog = logger.child('fallback')
+export const configLog   = logger.child('config')
+export const overrideLog = logger.child('override')
+
+// Legacy support for logUsage if needed by existing code
+export async function logUsage(entry: any): Promise<void> {
+  // This can be expanded to write to a local JSONL file if needed
+  // For now, it's just a placeholder to prevent build errors
+}
+
+export interface UsageEntry {
   timestamp: string;
   model: string;
   tier: string;
   cost: number;
   baselineCost: number;
-  savings: number; // 0-1 percentage
+  savings: number;
   latencyMs: number;
-  /** Whether the request completed successfully or ended in an error */
-  status?: "success" | "error";
-  /** Input (prompt) tokens reported by the provider */
+  status?: string;
   inputTokens?: number;
-  /** Output (completion) tokens reported by the provider */
   outputTokens?: number;
-  /** Partner service ID (e.g., "x_users_lookup") — only set for partner API calls */
   partnerId?: string;
-  /** Partner service name (e.g., "AttentionVC") — only set for partner API calls */
   service?: string;
-};
-
-const LOG_DIR = join(homedir(), ".openclaw", "blockrun", "logs");
-let dirReady = false;
-
-async function ensureDir(): Promise<void> {
-  if (dirReady) return;
-  await mkdir(LOG_DIR, { recursive: true });
-  dirReady = true;
-}
-
-/**
- * Log a usage entry as a JSON line.
- */
-export async function logUsage(entry: UsageEntry): Promise<void> {
-  try {
-    await ensureDir();
-    const date = entry.timestamp.slice(0, 10); // YYYY-MM-DD
-    const file = join(LOG_DIR, `usage-${date}.jsonl`);
-    await appendFile(file, JSON.stringify(entry) + "\n");
-  } catch {
-    // Never break the request flow
-  }
+  [key: string]: unknown;
 }

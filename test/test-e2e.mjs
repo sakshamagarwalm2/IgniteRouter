@@ -2,8 +2,8 @@
 /**
  * End-to-end test for Kimi thinking token stripping.
  *
- * 1. Start a mock BlockRun API that returns responses with Kimi thinking tokens
- * 2. Start ClawRouter proxy pointing to the mock server
+ * 1. Start a mock IgniteRouter API that returns responses with Kimi thinking tokens
+ * 2. Start IgniteRouter proxy pointing to the mock server
  * 3. Send requests through the proxy
  * 4. Verify thinking tokens are stripped from responses
  */
@@ -111,9 +111,9 @@ function getListeningPort(server) {
 }
 
 async function runTests() {
-  console.log("=== ClawRouter E2E Test: Thinking Token Stripping ===\n");
+  console.log("=== IgniteRouter E2E Test: Thinking Token Stripping ===\n");
 
-  // 1. Start mock BlockRun API server
+  // 1. Start mock IgniteRouter API server
   const mockServer = createServer((req, res) => {
     // Skip x402 payment flow - just return 200 directly
     const mockResponse = TEST_CASES[currentTestIndex].mockResponse;
@@ -123,16 +123,16 @@ async function runTests() {
 
   await new Promise((resolve) => mockServer.listen(0, "127.0.0.1", resolve));
   const mockPort = getListeningPort(mockServer);
-  console.log(`✓ Mock BlockRun API started on port ${mockPort}`);
+  console.log(`✓ Mock IgniteRouter API started on port ${mockPort}`);
 
-  // 2. Start ClawRouter proxy pointing to mock server
+  // 2. Start IgniteRouter proxy pointing to mock server
   let proxy;
   try {
     proxy = await startProxy({
       wallet: TEST_WALLET_KEY,
       apiBase: `http://127.0.0.1:${mockPort}`,
       port: 0,
-      onReady: (port) => console.log(`✓ ClawRouter proxy started on port ${port}`),
+      onReady: (port) => console.log(`✓ IgniteRouter proxy started on port ${port}`),
     });
   } catch (err) {
     console.error("Failed to start proxy:", err.message);
@@ -213,3 +213,4 @@ runTests().catch((err) => {
   console.error("Test failed:", err);
   process.exit(1);
 });
+

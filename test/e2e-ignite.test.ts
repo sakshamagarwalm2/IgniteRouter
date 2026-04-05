@@ -336,7 +336,7 @@ describe("IgniteRouter E2E Tests", () => {
         DUMMY_CONFIG,
       );
       expect(result.error).toBeDefined();
-      expect(result.error).toContain("not in your provider list");
+      expect(result.error).toContain("is not configured");
       expect(result.candidateProviders).toHaveLength(0);
     });
   });

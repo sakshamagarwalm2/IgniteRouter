@@ -1,25 +1,25 @@
 ---
-name: clawrouter
+name: IgniteRouter
 description: Smart LLM router — save 67% on inference costs. Routes every request to the cheapest capable model across 55+ models from OpenAI, Anthropic, Google, DeepSeek, xAI, NVIDIA, and more. 11 free NVIDIA models included.
-homepage: https://github.com/BlockRunAI/ClawRouter
-metadata: { "openclaw": { "emoji": "🦀", "requires": { "config": ["models.providers.blockrun"] } } }
+homepage: https://github.com/IgniteRouterAI/IgniteRouter
+metadata: { "openclaw": { "emoji": "🦀", "requires": { "config": ["models.providers.IgniteRouter"] } } }
 ---
 
-# ClawRouter
+# IgniteRouter
 
 Smart LLM router that saves 67% on inference costs by routing each request to the cheapest model that can handle it. 55+ models across 9 providers (11 free NVIDIA models), all through one wallet.
 
 ## Install
 
 ```bash
-openclaw plugins install @blockrun/clawrouter
+openclaw plugins install @igniterouter/igniterouter
 ```
 
 ## Setup
 
 ```bash
 # Enable smart routing (auto-picks cheapest model per request)
-openclaw models set blockrun/auto
+openclaw models set igniterouter/auto
 
 # Or pin a specific model
 openclaw models set openai/gpt-4o
@@ -27,7 +27,7 @@ openclaw models set openai/gpt-4o
 
 ## How Routing Works
 
-ClawRouter classifies each request into one of four tiers:
+IgniteRouter classifies each request into one of four tiers:
 
 - **SIMPLE** (40% of traffic) — factual lookups, greetings, translations → Gemini Flash ($0.60/M, 99% savings)
 - **MEDIUM** (30%) — summaries, explanations, data extraction → DeepSeek Chat ($0.42/M, 99% savings)
@@ -43,6 +43,7 @@ Rules handle ~80% of requests in <1ms. Only ambiguous queries hit the LLM classi
 ## Example Output
 
 ```
-[ClawRouter] google/gemini-2.5-flash (SIMPLE, rules, confidence=0.92)
+[IgniteRouter] google/gemini-2.5-flash (SIMPLE, rules, confidence=0.92)
              Cost: $0.0025 | Baseline: $0.308 | Saved: 99.2%
 ```
+

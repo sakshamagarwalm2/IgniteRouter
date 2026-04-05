@@ -2,7 +2,7 @@
  * End-to-end test for smart routing + proxy.
  *
  * Part 1: Router classification (no network, no wallet needed)
- * Part 2: Proxy startup + live request (requires BLOCKRUN_WALLET_KEY with funded USDC)
+ * Part 2: Proxy startup + live request (requires IgniteRouter_WALLET_KEY with funded USDC)
  *
  * Usage:
  *   npx tsup test/e2e.ts --format esm --outDir test/dist --no-dts && node test/dist/e2e.js
@@ -10,7 +10,7 @@
 
 import { route, DEFAULT_ROUTING_CONFIG, type RoutingDecision } from "../src/router/index.js";
 import { classifyByRules } from "../src/router/rules.js";
-import { BLOCKRUN_MODELS } from "../src/models.js";
+import { IgniteRouter_MODELS } from "../src/models.js";
 import { startProxy } from "../src/proxy.js";
 import type { ModelPricing } from "../src/router/selector.js";
 
@@ -18,8 +18,8 @@ import type { ModelPricing } from "../src/router/selector.js";
 
 function buildModelPricing(): Map<string, ModelPricing> {
   const map = new Map<string, ModelPricing>();
-  for (const m of BLOCKRUN_MODELS) {
-    if (m.id === "blockrun/auto") continue;
+  for (const m of IgniteRouter_MODELS) {
+    if (m.id === "igniterouter/auto") continue;
     map.set(m.id, { inputPrice: m.inputPrice, outputPrice: m.outputPrice });
   }
   return map;
@@ -576,9 +576,9 @@ await testRoute(
 
 console.log("\n═══ Part 3: Proxy Startup ═══\n");
 
-const walletKey = process.env.BLOCKRUN_WALLET_KEY;
+const walletKey = process.env.IgniteRouter_WALLET_KEY;
 if (!walletKey) {
-  console.log("  Skipped — set BLOCKRUN_WALLET_KEY to test proxy startup\n");
+  console.log("  Skipped — set IgniteRouter_WALLET_KEY to test proxy startup\n");
 } else {
   try {
     const proxy = await startProxy({
@@ -600,14 +600,14 @@ if (!walletKey) {
       `Health check: ${healthData.status}, wallet: ${healthData.wallet}`,
     );
 
-    // Send a test chat completion with blockrun/auto
-    console.log("\n  Sending test request (blockrun/auto)...");
+    // Send a test chat completion with igniterouter/auto
+    console.log("\n  Sending test request (igniterouter/auto)...");
     try {
       const chatRes = await fetch(`${proxy.baseUrl}/v1/chat/completions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "blockrun/auto",
+          model: "igniterouter/auto",
           messages: [{ role: "user", content: "What is 2+2?" }],
           max_tokens: 50,
         }),
@@ -647,3 +647,4 @@ console.log(`  ${passed} passed, ${failed} failed`);
 console.log("═══════════════════════════════════\n");
 
 process.exit(failed > 0 ? 1 : 0);
+

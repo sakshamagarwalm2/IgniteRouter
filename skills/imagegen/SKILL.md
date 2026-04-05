@@ -1,12 +1,12 @@
 ---
 name: imagegen
-description: Generate or edit images via BlockRun's image API. Trigger when the user asks to generate, create, draw, make an image — or to edit, modify, change, or retouch an existing image.
-metadata: { "openclaw": { "emoji": "🖼️", "requires": { "config": ["models.providers.blockrun"] } } }
+description: Generate or edit images via IgniteRouter's image API. Trigger when the user asks to generate, create, draw, make an image — or to edit, modify, change, or retouch an existing image.
+metadata: { "openclaw": { "emoji": "🖼️", "requires": { "config": ["models.providers.IgniteRouter"] } } }
 ---
 
 # Image Generation & Editing
 
-Generate or edit images through ClawRouter. Payment is automatic via x402.
+Generate or edit images through IgniteRouter. Payment is automatic via x402.
 
 ---
 
@@ -74,7 +74,7 @@ POST to `http://localhost:8402/v1/images/image2image`:
 }
 ```
 
-ClawRouter automatically downloads URLs and reads local file paths — pass them directly, no manual base64 conversion needed.
+IgniteRouter automatically downloads URLs and reads local file paths — pass them directly, no manual base64 conversion needed.
 
 Optional `mask` field: a second image (URL or path) that marks which areas to edit (white = edit, black = keep).
 
@@ -109,8 +109,9 @@ Response is identical to generation:
 
 ## Notes
 
-- Payment is automatic via x402 — deducted from the user's BlockRun wallet
-- If the call fails with a payment error, tell the user to fund their wallet at [blockrun.ai](https://blockrun.ai)
-- Google models may return base64 internally — ClawRouter uploads automatically and returns a hosted URL
+- Payment is automatic via x402 — deducted from the user's IgniteRouter wallet
+- If the call fails with a payment error, tell the user to fund their wallet at [IgniteRouter.ai](https://IgniteRouter.ai)
+- Google models may return base64 internally — IgniteRouter uploads automatically and returns a hosted URL
 - DALL-E 3 enforces OpenAI content policy; use `flux` or `nano-banana` for more flexibility
 - Image editing is only available with `gpt-image-1`; generation supports all 5 models
+

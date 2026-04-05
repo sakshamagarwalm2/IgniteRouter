@@ -722,7 +722,7 @@ export { igniteProvider } from "./provider.js";
 export { loadProviders } from "./user-providers.js";
 export {
   OPENCLAW_MODELS,
-  BLOCKRUN_MODELS,
+  IgniteRouter_MODELS,
   buildProviderModels,
   MODEL_ALIASES,
   resolveModelAlias,
@@ -757,3 +757,4 @@ export { ResponseCache } from "./response-cache.js";
 export type { CachedLLMResponse, ResponseCacheConfig } from "./response-cache.js";
 export { PARTNER_SERVICES, getPartnerService, buildPartnerTools } from "./partners/index.js";
 export type { PartnerServiceDefinition, PartnerToolDefinition } from "./partners/index.js";
+

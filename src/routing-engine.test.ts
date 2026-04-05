@@ -58,7 +58,7 @@ describe("route", () => {
     );
 
     expect(result.error).toContain("unknown/model");
-    expect(result.error).toContain("not in your provider list");
+    expect(result.error).toContain("is not configured");
     expect(result.candidateProviders).toHaveLength(0);
   });
 

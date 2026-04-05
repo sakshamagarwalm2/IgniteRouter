@@ -7,7 +7,7 @@
  * - Repeated restart cycles
  *
  * Usage:
- *   BLOCKRUN_WALLET_KEY=0x... tsx test/resilience-lifecycle.ts
+ *   IgniteRouter_WALLET_KEY=0x... tsx test/resilience-lifecycle.ts
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -41,10 +41,10 @@ type TestContext = {
 };
 
 /**
- * Setup test environment with mock BlockRun API server and proxy.
+ * Setup test environment with mock IgniteRouter API server and proxy.
  */
 async function setupTestEnvironment(): Promise<TestContext> {
-  // Create mock BlockRun API server
+  // Create mock IgniteRouter API server
   const mockServer = createServer((req: IncomingMessage, res: ServerResponse) => {
     if (req.url === "/v1/chat/completions" && req.method === "POST") {
       let body = "";
@@ -236,7 +236,7 @@ async function testCloseTimeout(): Promise<void> {
 
 async function main() {
   console.log("\n╔════════════════════════════════════════════════════════════════╗");
-  console.log("║       ClawRouter Resilience OpenClaw Lifecycle Tests          ║");
+  console.log("║       IgniteRouter Resilience OpenClaw Lifecycle Tests          ║");
   console.log("╚════════════════════════════════════════════════════════════════╝");
 
   await testSigusr1Restart();
@@ -259,3 +259,4 @@ main().catch((err) => {
   console.error("Fatal error:", err);
   process.exit(1);
 });
+

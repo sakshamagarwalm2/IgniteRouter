@@ -11,7 +11,7 @@
 import { startProxy } from "../dist/index.js";
 import { generatePrivateKey } from "viem/accounts";
 
-const TEST_WALLET_KEY = process.env.BLOCKRUN_WALLET_KEY || generatePrivateKey();
+const TEST_WALLET_KEY = process.env.IgniteRouter_WALLET_KEY || generatePrivateKey();
 
 const TEST_PORT = 8498;
 
@@ -269,3 +269,4 @@ main().catch((err) => {
   console.error("Test failed:", err);
   process.exit(1);
 });
+

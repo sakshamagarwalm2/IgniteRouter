@@ -3,7 +3,7 @@
  *
  * Tests:
  *   1. getProxyPort() returns default when env var not set
- *   2. getProxyPort() returns custom port when BLOCKRUN_PROXY_PORT is set
+ *   2. getProxyPort() returns custom port when IgniteRouter_PROXY_PORT is set
  *   3. startProxy() reuses existing proxy instead of failing with EADDRINUSE
  *   4. Reused proxy returns correct wallet address
  *
@@ -35,38 +35,38 @@ console.log("\n═══ Part 1: getProxyPort() ═══\n");
 
 {
   // Save original env value
-  const originalPort = process.env.BLOCKRUN_PROXY_PORT;
+  const originalPort = process.env.IgniteRouter_PROXY_PORT;
 
   // Test 1: Default port when env var not set
-  delete process.env.BLOCKRUN_PROXY_PORT;
+  delete process.env.IgniteRouter_PROXY_PORT;
   const defaultPort = getProxyPort();
   assert(defaultPort === 8402, `Default port is 8402: ${defaultPort}`);
 
   // Test 2: Custom port from env var
-  process.env.BLOCKRUN_PROXY_PORT = "9999";
+  process.env.IgniteRouter_PROXY_PORT = "9999";
   const customPort = getProxyPort();
   assert(customPort === 9999, `Custom port from env: ${customPort}`);
 
   // Test 3: Invalid port falls back to default
-  process.env.BLOCKRUN_PROXY_PORT = "invalid";
+  process.env.IgniteRouter_PROXY_PORT = "invalid";
   const invalidPort = getProxyPort();
   assert(invalidPort === 8402, `Invalid env falls back to 8402: ${invalidPort}`);
 
   // Test 4: Out of range port falls back to default
-  process.env.BLOCKRUN_PROXY_PORT = "99999";
+  process.env.IgniteRouter_PROXY_PORT = "99999";
   const outOfRange = getProxyPort();
   assert(outOfRange === 8402, `Out of range falls back to 8402: ${outOfRange}`);
 
   // Test 5: Zero port falls back to default
-  process.env.BLOCKRUN_PROXY_PORT = "0";
+  process.env.IgniteRouter_PROXY_PORT = "0";
   const zeroPort = getProxyPort();
   assert(zeroPort === 8402, `Zero falls back to 8402: ${zeroPort}`);
 
   // Restore original env value
   if (originalPort !== undefined) {
-    process.env.BLOCKRUN_PROXY_PORT = originalPort;
+    process.env.IgniteRouter_PROXY_PORT = originalPort;
   } else {
-    delete process.env.BLOCKRUN_PROXY_PORT;
+    delete process.env.IgniteRouter_PROXY_PORT;
   }
 }
 
@@ -212,3 +212,4 @@ console.log(`  ${passed} passed, ${failed} failed`);
 console.log("═══════════════════════════════════\n");
 
 process.exit(failed > 0 ? 1 : 0);
+

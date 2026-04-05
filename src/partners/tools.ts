@@ -47,7 +47,7 @@ function buildTool(service: PartnerServiceDefinition, proxyBaseUrl: string): Par
   }
 
   return {
-    name: `blockrun_${service.id}`,
+    name: `IgniteRouter_${service.id}`,
     description: [
       service.description,
       "",
@@ -118,3 +118,4 @@ function buildTool(service: PartnerServiceDefinition, proxyBaseUrl: string): Par
 export function buildPartnerTools(proxyBaseUrl: string): PartnerToolDefinition[] {
   return PARTNER_SERVICES.map((service) => buildTool(service, proxyBaseUrl));
 }
+

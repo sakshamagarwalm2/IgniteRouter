@@ -1,16 +1,16 @@
 /**
- * ClawRouter Tests
+ * IgniteRouter Tests
  *
  * Exercises routing logic, proxy lifecycle, and internal utilities
  * without needing a funded wallet or network access.
  *
- * Run: node test/test-clawrouter.mjs
+ * Run: node test/test-IgniteRouter.mjs
  */
 
 import {
   route,
   DEFAULT_ROUTING_CONFIG,
-  BLOCKRUN_MODELS,
+  IgniteRouter_MODELS,
   OPENCLAW_MODELS,
   startProxy,
   PaymentCache,
@@ -64,7 +64,7 @@ function assertTrue(condition, msg = "") {
 
 // Build model pricing map for routing
 const modelPricing = new Map();
-for (const m of BLOCKRUN_MODELS) {
+for (const m of IgniteRouter_MODELS) {
   modelPricing.set(m.id, { inputPrice: m.inputPrice, outputPrice: m.outputPrice });
 }
 
@@ -82,8 +82,8 @@ test("DEFAULT_ROUTING_CONFIG exists", () => {
   assertTrue(DEFAULT_ROUTING_CONFIG.tiers !== undefined);
 });
 
-test("BLOCKRUN_MODELS has 20+ models", () => {
-  assertTrue(BLOCKRUN_MODELS.length >= 20, `Only ${BLOCKRUN_MODELS.length} models`);
+test("IgniteRouter_MODELS has 20+ models", () => {
+  assertTrue(IgniteRouter_MODELS.length >= 20, `Only ${IgniteRouter_MODELS.length} models`);
 });
 
 test("OPENCLAW_MODELS has 20+ models", () => {
@@ -470,8 +470,8 @@ test("Tier is valid enum value", () => {
 
 console.log("\n═══ Model Data Validation ═══\n");
 
-test("All BLOCKRUN_MODELS have required fields", () => {
-  for (const model of BLOCKRUN_MODELS) {
+test("All IgniteRouter_MODELS have required fields", () => {
+  for (const model of IgniteRouter_MODELS) {
     assertTrue(model.id !== undefined, `Model missing id`);
     assertTrue(model.name !== undefined, `Model ${model.id} missing name`);
     assertTrue(model.inputPrice !== undefined, `Model ${model.id} missing inputPrice`);
@@ -488,16 +488,16 @@ test("All OPENCLAW_MODELS have required fields", () => {
   }
 });
 
-test("Model IDs are unique in BLOCKRUN_MODELS", () => {
+test("Model IDs are unique in IgniteRouter_MODELS", () => {
   const ids = new Set();
-  for (const model of BLOCKRUN_MODELS) {
+  for (const model of IgniteRouter_MODELS) {
     assertTrue(!ids.has(model.id), `Duplicate model ID: ${model.id}`);
     ids.add(model.id);
   }
 });
 
 test("Model prices are non-negative", () => {
-  for (const model of BLOCKRUN_MODELS) {
+  for (const model of IgniteRouter_MODELS) {
     assertTrue(model.inputPrice >= 0, `Model ${model.id} has negative inputPrice`);
     assertTrue(model.outputPrice >= 0, `Model ${model.id} has negative outputPrice`);
   }
@@ -701,3 +701,4 @@ console.log(`\n  ${passed} passed, ${failed} failed\n`);
 if (failed > 0) {
   process.exit(1);
 }
+

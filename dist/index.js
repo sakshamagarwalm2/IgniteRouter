@@ -13527,7 +13527,7 @@ var require_snapshot_utils = __commonJS({
 var require_snapshot_recorder = __commonJS({
   "node_modules/undici/lib/mock/snapshot-recorder.js"(exports, module) {
     "use strict";
-    var { writeFile: writeFile2, readFile: readFile2, mkdir: mkdir3 } = __require("fs/promises");
+    var { writeFile: writeFile2, readFile: readFile2, mkdir: mkdir2 } = __require("fs/promises");
     var { dirname: dirname4, resolve } = __require("path");
     var { setTimeout: setTimeout2, clearTimeout: clearTimeout2 } = __require("timers");
     var { InvalidArgumentError, UndiciError } = require_errors();
@@ -13759,7 +13759,7 @@ var require_snapshot_recorder = __commonJS({
           throw new InvalidArgumentError("Snapshot path is required");
         }
         const resolvedPath = resolve(path);
-        await mkdir3(dirname4(resolvedPath), { recursive: true });
+        await mkdir2(dirname4(resolvedPath), { recursive: true });
         const data = Array.from(this.#snapshots.entries()).map(([hash, snapshot]) => ({
           hash,
           snapshot
@@ -24926,15 +24926,15 @@ var MODEL_ALIASES = {
   // Routing profile aliases (common variations)
   "auto-router": "auto",
   router: "auto"
-  // Note: auto, eco, premium are virtual routing profiles registered in BLOCKRUN_MODELS
+  // Note: auto, eco, premium are virtual routing profiles registered in IgniteRouter_MODELS
   // They don't need aliases since they're already top-level model IDs
 };
 function resolveModelAlias(model) {
   const normalized = model.trim().toLowerCase();
   const resolved = MODEL_ALIASES[normalized];
   if (resolved) return resolved;
-  if (normalized.startsWith("blockrun/")) {
-    const withoutPrefix = normalized.slice("blockrun/".length);
+  if (normalized.startsWith("IgniteRouter/")) {
+    const withoutPrefix = normalized.slice("IgniteRouter/".length);
     const resolvedWithoutPrefix = MODEL_ALIASES[withoutPrefix];
     if (resolvedWithoutPrefix) return resolvedWithoutPrefix;
     return withoutPrefix;
@@ -24943,14 +24943,14 @@ function resolveModelAlias(model) {
     const withoutPrefix = normalized.slice("openai/".length);
     const resolvedWithoutPrefix = MODEL_ALIASES[withoutPrefix];
     if (resolvedWithoutPrefix) return resolvedWithoutPrefix;
-    const isVirtualProfile = BLOCKRUN_MODELS.some((m) => m.id === withoutPrefix);
+    const isVirtualProfile = IgniteRouter_MODELS.some((m) => m.id === withoutPrefix);
     if (isVirtualProfile) return withoutPrefix;
   }
   return model;
 }
-var BLOCKRUN_MODELS = [
+var IgniteRouter_MODELS = [
   // Smart routing meta-models — proxy replaces with actual model
-  // NOTE: Model IDs are WITHOUT provider prefix (OpenClaw adds "blockrun/" automatically)
+  // NOTE: Model IDs are WITHOUT provider prefix (OpenClaw adds "IgniteRouter/" automatically)
   {
     id: "igniterouter/auto",
     name: "IgniteRouter Auto (Smart Router)",
@@ -25481,7 +25481,7 @@ var BLOCKRUN_MODELS = [
   },
   // Free models (hosted by NVIDIA, billingMode: "free" on server)
   // IDs use "free/" prefix so users see them as free in the /model picker.
-  // ClawRouter maps free/xxx → nvidia/xxx before sending to BlockRun upstream.
+  // IgniteRouter maps free/xxx → nvidia/xxx before sending to IgniteRouter upstream.
   // toolCalling intentionally omitted: structured function calling unverified.
   {
     id: "free/gpt-oss-120b",
@@ -25648,12 +25648,12 @@ function toOpenClawModel(m) {
   };
 }
 var ALIAS_MODELS = Object.entries(MODEL_ALIASES).map(([alias, targetId]) => {
-  const target = BLOCKRUN_MODELS.find((m) => m.id === targetId);
+  const target = IgniteRouter_MODELS.find((m) => m.id === targetId);
   if (!target) return null;
   return toOpenClawModel({ ...target, id: alias, name: `${alias} \u2192 ${target.name}` });
 }).filter((m) => m !== null);
 var OPENCLAW_MODELS = [
-  ...BLOCKRUN_MODELS.map(toOpenClawModel),
+  ...IgniteRouter_MODELS.map(toOpenClawModel),
   ...ALIAS_MODELS
 ];
 function buildProviderModels(baseUrl) {
@@ -25664,32 +25664,32 @@ function buildProviderModels(baseUrl) {
   };
 }
 function isAgenticModel(modelId) {
-  const model = BLOCKRUN_MODELS.find(
-    (m) => m.id === modelId || m.id === modelId.replace("blockrun/", "")
+  const model = IgniteRouter_MODELS.find(
+    (m) => m.id === modelId || m.id === modelId.replace("IgniteRouter/", "")
   );
   return model?.agentic ?? false;
 }
 function getAgenticModels() {
-  return BLOCKRUN_MODELS.filter((m) => m.agentic).map((m) => m.id);
+  return IgniteRouter_MODELS.filter((m) => m.agentic).map((m) => m.id);
 }
 function supportsToolCalling(modelId) {
-  const normalized = modelId.replace("blockrun/", "");
-  const model = BLOCKRUN_MODELS.find((m) => m.id === normalized);
+  const normalized = modelId.replace("IgniteRouter/", "");
+  const model = IgniteRouter_MODELS.find((m) => m.id === normalized);
   return model?.toolCalling ?? false;
 }
 function supportsVision(modelId) {
-  const normalized = modelId.replace("blockrun/", "");
-  const model = BLOCKRUN_MODELS.find((m) => m.id === normalized);
+  const normalized = modelId.replace("IgniteRouter/", "");
+  const model = IgniteRouter_MODELS.find((m) => m.id === normalized);
   return model?.vision ?? false;
 }
 function getModelContextWindow(modelId) {
-  const normalized = modelId.replace("blockrun/", "");
-  const model = BLOCKRUN_MODELS.find((m) => m.id === normalized);
+  const normalized = modelId.replace("IgniteRouter/", "");
+  const model = IgniteRouter_MODELS.find((m) => m.id === normalized);
   return model?.contextWindow;
 }
 function isReasoningModel(modelId) {
-  const normalized = modelId.replace("blockrun/", "");
-  const model = BLOCKRUN_MODELS.find((m) => m.id === normalized);
+  const normalized = modelId.replace("IgniteRouter/", "");
+  const model = IgniteRouter_MODELS.find((m) => m.id === normalized);
   return model?.reasoning ?? false;
 }
 
@@ -25715,10 +25715,127 @@ var igniteProvider = {
 
 // src/proxy.ts
 import { createServer } from "http";
+
+// src/cost-estimator.ts
+function estimateCost(provider, inputTokens, outputTokens) {
+  const inputCostUsd = provider.inputPricePerMToken / 1e6 * inputTokens;
+  const outputCostUsd = provider.outputPricePerMToken / 1e6 * outputTokens;
+  const totalCostUsd = inputCostUsd + outputCostUsd;
+  let formattedCost;
+  if (totalCostUsd === 0) {
+    formattedCost = "free (local)";
+  } else if (totalCostUsd < 1e-4) {
+    formattedCost = "< $0.0001";
+  } else {
+    formattedCost = "$" + totalCostUsd.toFixed(4);
+  }
+  return {
+    modelId: provider.id,
+    inputTokens,
+    outputTokens,
+    inputCostUsd,
+    outputCostUsd,
+    totalCostUsd,
+    formattedCost
+  };
+}
+function estimateSavings(actual, allProviders, inputTokens, outputTokens) {
+  if (allProviders.length === 0) {
+    return {
+      actualCostUsd: actual.totalCostUsd,
+      baselineCostUsd: actual.totalCostUsd,
+      savedUsd: 0,
+      savedPercent: 0,
+      formattedSavings: "Same cost as baseline"
+    };
+  }
+  const mostExpensive = allProviders.reduce(
+    (max, p) => p.inputPricePerMToken > max.inputPricePerMToken ? p : max,
+    allProviders[0]
+  );
+  const baselineCost = estimateCost(mostExpensive, inputTokens, outputTokens);
+  const savedUsd = Math.max(0, baselineCost.totalCostUsd - actual.totalCostUsd);
+  const savedPercent = baselineCost.totalCostUsd > 0 ? Math.round(savedUsd / baselineCost.totalCostUsd * 100) : 0;
+  const formattedSavings = savedPercent > 0 ? `Saved $${savedUsd.toFixed(4)} vs ${mostExpensive.id} (${savedPercent}% cheaper)` : `Same cost as baseline`;
+  return {
+    actualCostUsd: actual.totalCostUsd,
+    baselineCostUsd: baselineCost.totalCostUsd,
+    savedUsd,
+    savedPercent,
+    formattedSavings
+  };
+}
+var RoutingTimer = class {
+  start = Date.now();
+  marks = {};
+  mark(phase) {
+    this.marks[phase] = Date.now() - this.start;
+  }
+  getOverhead() {
+    const end = Date.now();
+    return {
+      taskClassificationMs: this.marks["task"] ?? 0,
+      complexityScoringMs: (this.marks["complexity"] ?? 0) - (this.marks["task"] ?? 0),
+      candidateSelectionMs: (this.marks["selection"] ?? 0) - (this.marks["complexity"] ?? 0),
+      totalRoutingMs: end - this.start
+    };
+  }
+};
+
+// src/proxy.ts
 import { finished, Readable } from "stream";
-import { homedir as homedir4 } from "os";
-import { join as join5 } from "path";
-import { mkdir as mkdir2, writeFile, readFile, stat as fsStat } from "fs/promises";
+
+// src/logger.ts
+var LEVEL_ORDER = ["trace", "debug", "info", "warn", "error"];
+function shouldLog(msgLevel, minLevel) {
+  return LEVEL_ORDER.indexOf(msgLevel) >= LEVEL_ORDER.indexOf(minLevel);
+}
+function createLogger(subsystem) {
+  const minLevel = process.env.IGNITEROUTER_LOG_LEVEL ?? "info";
+  function log(level, msg, fields) {
+    if (!shouldLog(level, minLevel)) return;
+    const prefix = `[${subsystem}]`;
+    const fieldStr = fields && Object.keys(fields).length > 0 ? " " + Object.entries(fields).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(" ") : "";
+    switch (level) {
+      case "error":
+        console.error(prefix, "ERROR", msg + fieldStr);
+        break;
+      case "warn":
+        console.warn(prefix, "WARN ", msg + fieldStr);
+        break;
+      case "debug":
+        console.debug(prefix, "DEBUG", msg + fieldStr);
+        break;
+      case "trace":
+        console.debug(prefix, "TRACE", msg + fieldStr);
+        break;
+      default:
+        console.log(prefix, "INFO ", msg + fieldStr);
+        break;
+    }
+  }
+  return {
+    trace: (msg, fields) => log("trace", msg, fields),
+    debug: (msg, fields) => log("debug", msg, fields),
+    info: (msg, fields) => log("info", msg, fields),
+    warn: (msg, fields) => log("warn", msg, fields),
+    error: (msg, fields) => log("error", msg, fields),
+    child: (component) => createLogger(`igniterouter/${component}`)
+  };
+}
+var logger = createLogger("igniterouter");
+var routingLog = logger.child("routing");
+var proxyLog = logger.child("proxy");
+var fallbackLog = logger.child("fallback");
+var configLog = logger.child("config");
+var overrideLog = logger.child("override");
+async function logUsage(entry) {
+}
+
+// src/proxy.ts
+import { homedir as homedir3 } from "os";
+import { join as join4 } from "path";
+import { mkdir, writeFile, readFile, stat as fsStat } from "fs/promises";
 import { readFileSync as readFileSync2, existsSync } from "fs";
 
 // src/router/rules.ts
@@ -27281,7 +27398,7 @@ var DEFAULT_ROUTING_CONFIG = {
       ]
     }
   },
-  // Eco tier configs - absolute cheapest (blockrun/eco)
+  // Eco tier configs - absolute cheapest (IgniteRouter/eco)
   ecoTiers: {
     SIMPLE: {
       primary: "free/gpt-oss-120b",
@@ -27327,7 +27444,7 @@ var DEFAULT_ROUTING_CONFIG = {
       fallback: ["xai/grok-4-fast-reasoning", "deepseek/deepseek-reasoner"]
     }
   },
-  // Premium tier configs - best quality (blockrun/premium)
+  // Premium tier configs - best quality (IgniteRouter/premium)
   // codex=complex coding, kimi=simple coding, sonnet=reasoning/instructions, opus=architecture/PM/audits
   premiumTiers: {
     SIMPLE: {
@@ -27576,66 +27693,74 @@ var AGENTIC_PATTERNS = [
   /summarize.*results|summary.*of.*findings/
 ];
 function classifyTask(messages, tools, estimatedTokens) {
-  if (hasImageInMessages(messages)) {
+  const result = (() => {
+    if (hasImageInMessages(messages)) {
+      return {
+        taskType: "vision" /* Vision */,
+        confidence: "signal",
+        reason: "image detected in content"
+      };
+    }
+    const hasTools = Array.isArray(tools) && tools.length > 0;
+    const lastUserMsg = getLastUserMessage(messages);
+    if (hasTools) {
+      return {
+        taskType: "agentic" /* Agentic */,
+        confidence: "signal",
+        reason: "tools array present"
+      };
+    }
+    const agenticMatch = findMatchingPattern(lastUserMsg, AGENTIC_PATTERNS);
+    if (agenticMatch) {
+      return {
+        taskType: "agentic" /* Agentic */,
+        confidence: "keyword",
+        reason: `keyword: ${agenticMatch}`
+      };
+    }
+    if (estimatedTokens !== void 0 && estimatedTokens > 8e3) {
+      return {
+        taskType: "deep" /* Deep */,
+        confidence: "signal",
+        reason: `token count ${estimatedTokens} > 8000`
+      };
+    }
+    const deepMatch = findMatchingPattern(lastUserMsg, DEEP_PATTERNS);
+    if (deepMatch) {
+      return {
+        taskType: "deep" /* Deep */,
+        confidence: "keyword",
+        reason: `keyword: ${deepMatch}`
+      };
+    }
+    const reasoningMatch = findMatchingPattern(lastUserMsg, REASONING_PATTERNS);
+    if (reasoningMatch) {
+      return {
+        taskType: "reasoning" /* Reasoning */,
+        confidence: "keyword",
+        reason: `keyword: ${reasoningMatch}`
+      };
+    }
+    const creativeMatch = findMatchingPattern(lastUserMsg, CREATIVE_PATTERNS);
+    if (creativeMatch) {
+      return {
+        taskType: "creative" /* Creative */,
+        confidence: "keyword",
+        reason: `keyword: ${creativeMatch}`
+      };
+    }
     return {
-      taskType: "vision" /* Vision */,
-      confidence: "signal",
-      reason: "image detected in content"
+      taskType: "chat" /* Chat */,
+      confidence: "default",
+      reason: "default fallback"
     };
-  }
-  const hasTools = Array.isArray(tools) && tools.length > 0;
-  const lastUserMsg = getLastUserMessage(messages);
-  if (hasTools) {
-    return {
-      taskType: "agentic" /* Agentic */,
-      confidence: "signal",
-      reason: "tools array present"
-    };
-  }
-  const agenticMatch = findMatchingPattern(lastUserMsg, AGENTIC_PATTERNS);
-  if (agenticMatch) {
-    return {
-      taskType: "agentic" /* Agentic */,
-      confidence: "keyword",
-      reason: `keyword: ${agenticMatch}`
-    };
-  }
-  if (estimatedTokens !== void 0 && estimatedTokens > 8e3) {
-    return {
-      taskType: "deep" /* Deep */,
-      confidence: "signal",
-      reason: `token count ${estimatedTokens} > 8000`
-    };
-  }
-  const deepMatch = findMatchingPattern(lastUserMsg, DEEP_PATTERNS);
-  if (deepMatch) {
-    return {
-      taskType: "deep" /* Deep */,
-      confidence: "keyword",
-      reason: `keyword: ${deepMatch}`
-    };
-  }
-  const reasoningMatch = findMatchingPattern(lastUserMsg, REASONING_PATTERNS);
-  if (reasoningMatch) {
-    return {
-      taskType: "reasoning" /* Reasoning */,
-      confidence: "keyword",
-      reason: `keyword: ${reasoningMatch}`
-    };
-  }
-  const creativeMatch = findMatchingPattern(lastUserMsg, CREATIVE_PATTERNS);
-  if (creativeMatch) {
-    return {
-      taskType: "creative" /* Creative */,
-      confidence: "keyword",
-      reason: `keyword: ${creativeMatch}`
-    };
-  }
-  return {
-    taskType: "chat" /* Chat */,
-    confidence: "default",
-    reason: "default fallback"
-  };
+  })();
+  routingLog.debug("Task classification result", {
+    taskType: result.taskType,
+    confidence: result.confidence,
+    reason: result.reason
+  });
+  return result;
 }
 
 // src/complexity-scorer.ts
@@ -27752,41 +27877,52 @@ function scoreViaKeywords(prompt) {
   return Math.max(0.05, Math.min(0.95, score));
 }
 async function scoreComplexity(prompt, timeoutMs = 2e3) {
-  const startTime = Date.now();
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const encodedPrompt = encodeURIComponent(prompt);
-    const response = await fetch(`http://localhost:8500/score?prompt=${encodedPrompt}`, {
-      method: "GET",
-      signal: controller.signal
-    });
-    clearTimeout(timeout);
-    if (response.ok) {
-      const data = await response.json();
-      const score = typeof data.score === "number" ? data.score : 0.5;
-      const clampedScore = Math.max(0, Math.min(1, score));
-      return {
-        score: clampedScore,
-        tier: scoreToTier(clampedScore),
-        method: "routellm",
-        latencyMs: Date.now() - startTime
-      };
+  const result = await (async () => {
+    const startTime = Date.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const encodedPrompt = encodeURIComponent(prompt);
+      const response = await fetch(`http://localhost:8500/score?prompt=${encodedPrompt}`, {
+        method: "GET",
+        signal: controller.signal
+      });
+      clearTimeout(timeout);
+      if (response.ok) {
+        const data = await response.json();
+        const score = typeof data.score === "number" ? data.score : 0.5;
+        const clampedScore = Math.max(0, Math.min(1, score));
+        routingLog.debug("RouteLLM score", { score: clampedScore, latencyMs: Date.now() - startTime });
+        return {
+          score: clampedScore,
+          tier: scoreToTier(clampedScore),
+          method: "routellm",
+          latencyMs: Date.now() - startTime
+        };
+      }
+    } catch {
+      clearTimeout(timeout);
     }
-  } catch {
-    clearTimeout(timeout);
-  }
-  const keywordScore = scoreViaKeywords(prompt);
-  return {
-    score: keywordScore,
-    tier: scoreToTier(keywordScore),
-    method: "keyword-fallback",
-    latencyMs: Date.now() - startTime
-  };
+    routingLog.debug("RouteLLM unavailable, using keyword fallback");
+    const keywordScore = scoreViaKeywords(prompt);
+    return {
+      score: keywordScore,
+      tier: scoreToTier(keywordScore),
+      method: "keyword-fallback",
+      latencyMs: Date.now() - startTime
+    };
+  })();
+  routingLog.debug("Complexity score", {
+    score: result.score,
+    tier: result.tier,
+    method: result.method,
+    latencyMs: result.latencyMs
+  });
+  return result;
 }
 
 // src/override-detector.ts
-var AUTO_ROUTING_VALUES = ["smartrouter/auto", "igniterouter/auto", "ignite/auto", "auto", "blockrun/auto"];
+var AUTO_ROUTING_VALUES = ["smartrouter/auto", "igniterouter/auto", "ignite/auto", "auto", "igniterouter/auto"];
 var ALIAS_MAP = {
   "gpt-4o": "openai/gpt-4o",
   "gpt-4o-mini": "openai/gpt-4o-mini",
@@ -28076,7 +28212,9 @@ function estimateTokens(messages) {
   return Math.ceil(totalChars / 4);
 }
 async function route2(context, config) {
+  const timer = new RoutingTimer();
   const startTime = Date.now();
+  routingLog.debug("Routing decision started", { model: context.requestedModel, tokens: context.estimatedTokens });
   const override = detectOverride(context.messages, context.requestedModel, config.providers);
   if (override.detected) {
     if (override.notConfigured) {
@@ -28098,16 +28236,22 @@ async function route2(context, config) {
         latencyMs: Date.now() - startTime
       };
     }
+    routingLog.info("Override detected", { model: override.modelId, source: override.source });
     return {
       override,
       candidateProviders: [matchedProvider],
       latencyMs: Date.now() - startTime
     };
   }
-  const taskType = classifyTask(context.messages).taskType;
+  const taskResult = classifyTask(context.messages, context.tools);
+  const taskType = taskResult.taskType;
+  timer.mark("task");
+  routingLog.debug("Task classified", { taskType, confidence: taskResult.confidence, reason: taskResult.reason });
   const complexityResult = await scoreComplexity(
     typeof context.messages[context.messages.length - 1]?.content === "string" ? context.messages[context.messages.length - 1].content : ""
   );
+  timer.mark("complexity");
+  routingLog.debug("Complexity scored", { score: complexityResult.score, tier: complexityResult.tier, method: complexityResult.method });
   const hasImages = detectImages(context.messages);
   const hasTools = Array.isArray(context.tools) && context.tools.length > 0;
   const needsStreaming = context.needsStreaming ?? false;
@@ -28119,7 +28263,14 @@ async function route2(context, config) {
     config.defaultPriority,
     { hasImages, hasTools, needsStreaming, estimatedTokens }
   );
+  timer.mark("selection");
+  routingLog.info("Candidates selected", {
+    count: selection.candidates.length,
+    filtered: selection.filtered.length,
+    top: selection.candidates[0]?.provider.id ?? "none"
+  });
   if (selection.candidates.length === 0) {
+    routingLog.warn("No candidates after filtering", { filtered: selection.filtered.map((p) => p.id) });
     const filteredReasons = Array.from(selection.filterReasons.entries()).map(([id, reason]) => `  ${id}: ${reason}`).join("\n");
     return {
       taskType,
@@ -28132,22 +28283,21 @@ ${filteredReasons}`,
       latencyMs: Date.now() - startTime
     };
   }
+  const overhead = timer.getOverhead();
   return {
     taskType,
     tier: complexityResult.tier,
     complexityScore: complexityResult.score,
     selection,
     candidateProviders: selection.candidates.map((c) => c.provider),
-    latencyMs: Date.now() - startTime
+    latencyMs: overhead.totalRoutingMs,
+    routingOverhead: overhead
   };
 }
 
 // src/fallback-caller.ts
 function classifyHttpError(status, body) {
   if (status === 429) return "rate-limit";
-  if (status >= 500 && status <= 504 && status !== 502) {
-    if (status === 502 || status === 503 || status === 504) return "server-error";
-  }
   if (status === 500 || status === 502 || status === 503 || status === 504) return "server-error";
   if (status === 402) return "quota-exceeded";
   if (status === 403) {
@@ -28164,10 +28314,13 @@ async function callWithFallback(candidates, buildRequest, options) {
   const timeoutMs = options?.timeoutMs ?? 3e4;
   const retryableOnly = options?.retryableOnly ?? false;
   const attempts = [];
-  for (const candidate of candidates) {
+  for (let i = 0; i < candidates.length; i++) {
+    const candidate = candidates[i];
+    const attemptNumber = i + 1;
     const startTime = Date.now();
     try {
       const { url, init } = buildRequest(candidate.provider);
+      fallbackLog.debug("Trying provider", { model: candidate.provider.id, attempt: attemptNumber });
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
       const response = await fetch(url, {
@@ -28188,15 +28341,28 @@ async function callWithFallback(candidates, buildRequest, options) {
           });
           continue;
         }
+        attempts.push({
+          provider: candidate.provider,
+          success: true,
+          statusCode: response.status,
+          latencyMs
+        });
+        fallbackLog.info("Provider succeeded", { model: candidate.provider.id, latencyMs });
         return {
           success: true,
           attempts,
-          finalResponse: response,
+          finalResponse: new Response(text, { status: response.status, headers: response.headers }),
           usedProvider: candidate.provider
         };
       }
       const body = await response.text().catch(() => "");
       const reason = classifyHttpError(response.status, body);
+      fallbackLog.warn("Provider failed", {
+        model: candidate.provider.id,
+        reason,
+        status: response.status,
+        latencyMs
+      });
       if (reason === "bad-request") {
         attempts.push({
           provider: candidate.provider,
@@ -28227,9 +28393,15 @@ async function callWithFallback(candidates, buildRequest, options) {
       const latencyMs = Date.now() - startTime;
       const error = err;
       let reason = "unknown";
-      if (error.name === "AbortError") {
+      if (error.name === "AbortError" || error.message.toLowerCase().includes("aborted") || error.message.toLowerCase().includes("timeout")) {
         reason = "timeout";
       }
+      fallbackLog.warn("Provider failed", {
+        model: candidate.provider.id,
+        reason,
+        errorMessage: error.message,
+        latencyMs
+      });
       attempts.push({
         provider: candidate.provider,
         success: false,
@@ -28239,6 +28411,7 @@ async function callWithFallback(candidates, buildRequest, options) {
       });
     }
   }
+  fallbackLog.error("All providers exhausted", { tried: attempts.length });
   return {
     success: false,
     attempts,
@@ -28253,27 +28426,6 @@ function buildErrorSummary(attempts) {
   return `IgniteRouter tried ${attempts.length} model${attempts.length !== 1 ? "s" : ""}:
 ${lines.join("\n")}
 Please try again, or add more models to your provider list.`;
-}
-
-// src/logger.ts
-import { appendFile, mkdir } from "fs/promises";
-import { join } from "path";
-import { homedir } from "os";
-var LOG_DIR = join(homedir(), ".openclaw", "blockrun", "logs");
-var dirReady = false;
-async function ensureDir() {
-  if (dirReady) return;
-  await mkdir(LOG_DIR, { recursive: true });
-  dirReady = true;
-}
-async function logUsage(entry) {
-  try {
-    await ensureDir();
-    const date = entry.timestamp.slice(0, 10);
-    const file = join(LOG_DIR, `usage-${date}.jsonl`);
-    await appendFile(file, JSON.stringify(entry) + "\n");
-  } catch {
-  }
 }
 
 // src/stats.ts
@@ -28316,22 +28468,22 @@ function readTextFileSync(filePath) {
 }
 
 // src/stats.ts
-import { join as join3 } from "path";
-import { homedir as homedir2 } from "os";
+import { join as join2 } from "path";
+import { homedir } from "os";
 
 // src/version.ts
 import { createRequire } from "module";
 import { fileURLToPath } from "url";
-import { dirname, join as join2 } from "path";
+import { dirname, join } from "path";
 var __filename2 = fileURLToPath(import.meta.url);
 var __dirname = dirname(__filename2);
 var require2 = createRequire(import.meta.url);
-var pkg = require2(join2(__dirname, "..", "package.json"));
+var pkg = require2(join(__dirname, "..", "package.json"));
 var VERSION = pkg.version;
-var USER_AGENT = `clawrouter/${VERSION}`;
+var USER_AGENT = `IgniteRouter/${VERSION}`;
 
 // src/stats.ts
-var LOG_DIR2 = join3(homedir2(), ".openclaw", "igniterouter", "logs");
+var LOG_DIR = join2(homedir(), ".openclaw", "igniterouter", "logs");
 async function parseLogFile(filePath) {
   try {
     const content = await readTextFile(filePath);
@@ -28359,7 +28511,7 @@ async function parseLogFile(filePath) {
 }
 async function getLogFiles() {
   try {
-    const files = await readdir(LOG_DIR2);
+    const files = await readdir(LOG_DIR);
     return files.filter((f) => f.startsWith("usage-") && f.endsWith(".jsonl")).sort().reverse();
   } catch {
     return [];
@@ -28394,7 +28546,7 @@ async function getStats(days = 7) {
   let totalLatency = 0;
   for (const file of filesToRead) {
     const date = file.replace("usage-", "").replace(".jsonl", "");
-    const filePath = join3(LOG_DIR2, file);
+    const filePath = join2(LOG_DIR, file);
     const entries = await parseLogFile(filePath);
     if (entries.length === 0) continue;
     const dayStats = aggregateDay(date, entries);
@@ -28486,9 +28638,9 @@ function formatStatsAscii(stats) {
 }
 async function clearStats() {
   try {
-    const files = await readdir(LOG_DIR2);
+    const files = await readdir(LOG_DIR);
     const logFiles = files.filter((f) => f.startsWith("usage-") && f.endsWith(".jsonl"));
-    await Promise.all(logFiles.map((f) => unlink(join3(LOG_DIR2, f))));
+    await Promise.all(logFiles.map((f) => unlink(join2(LOG_DIR, f))));
     return { deletedFiles: logFiles.length };
   } catch {
     return { deletedFiles: 0 };
@@ -28994,8 +29146,8 @@ var STATIC_CODEBOOK = {
   $E02: "Let me know if you",
   $E03: "internal APIs",
   $E04: "session cookies",
-  // BlockRun model aliases (common in prompts)
-  $M01: "blockrun/",
+  // IgniteRouter model aliases (common in prompts)
+  $M01: "IgniteRouter/",
   $M02: "openai/",
   $M03: "anthropic/",
   $M04: "google/",
@@ -29804,7 +29956,7 @@ function hashRequestContent(lastUserContent, toolCallNames) {
 }
 
 // src/updater.ts
-var NPM_REGISTRY = "https://registry.npmjs.org/@blockrun/clawrouter/latest";
+var NPM_REGISTRY = "https://registry.npmjs.org/@igniterouter/igniterouter/latest";
 var CHECK_TIMEOUT_MS = 5e3;
 function compareSemver(a, b) {
   const pa = a.split(".").map(Number);
@@ -29830,8 +29982,8 @@ async function checkForUpdates() {
     if (!latest) return;
     if (compareSemver(latest, VERSION) > 0) {
       console.log("");
-      console.log(`\x1B[33m\u2B06\uFE0F  ClawRouter ${latest} available (you have ${VERSION})\x1B[0m`);
-      console.log(`   Run: \x1B[36mnpx @blockrun/clawrouter@latest\x1B[0m`);
+      console.log(`\x1B[33m\u2B06\uFE0F  IgniteRouter ${latest} available (you have ${VERSION})\x1B[0m`);
+      console.log(`   Run: \x1B[36mnpx @igniterouter/igniterouter@latest\x1B[0m`);
       console.log("");
     }
   } catch {
@@ -29840,9 +29992,9 @@ async function checkForUpdates() {
 
 // src/exclude-models.ts
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
-import { join as join4, dirname as dirname2 } from "path";
-import { homedir as homedir3 } from "os";
-var DEFAULT_FILE_PATH = join4(homedir3(), ".openclaw", "blockrun", "exclude-models.json");
+import { join as join3, dirname as dirname2 } from "path";
+import { homedir as homedir2 } from "os";
+var DEFAULT_FILE_PATH = join3(homedir2(), ".openclaw", "IgniteRouter", "exclude-models.json");
 function loadExcludeList(filePath = DEFAULT_FILE_PATH) {
   try {
     const raw = readFileSync(filePath, "utf-8");
@@ -30064,13 +30216,13 @@ ${lines.join("\n")}`;
 
 // src/upstream-proxy.ts
 async function applyUpstreamProxy(proxyUrl) {
-  const url = proxyUrl ?? process.env.BLOCKRUN_UPSTREAM_PROXY;
+  const url = proxyUrl ?? process.env.IgniteRouter_UPSTREAM_PROXY;
   if (!url) return void 0;
   let parsed;
   try {
     parsed = new URL(url);
   } catch {
-    console.warn(`[ClawRouter] Invalid BLOCKRUN_UPSTREAM_PROXY URL: ${url} \u2014 skipping proxy setup`);
+    console.warn(`[IgniteRouter] Invalid IgniteRouter_UPSTREAM_PROXY URL: ${url} \u2014 skipping proxy setup`);
     return void 0;
   }
   const scheme = parsed.protocol;
@@ -30083,13 +30235,13 @@ async function applyUpstreamProxy(proxyUrl) {
       setGlobalDispatcher(new ProxyAgent(url));
     } else {
       console.warn(
-        `[ClawRouter] Unsupported proxy scheme "${scheme}" in BLOCKRUN_UPSTREAM_PROXY \u2014 use http:// or socks5://`
+        `[IgniteRouter] Unsupported proxy scheme "${scheme}" in IgniteRouter_UPSTREAM_PROXY \u2014 use http:// or socks5://`
       );
       return void 0;
     }
   } catch (err) {
     console.warn(
-      `[ClawRouter] Failed to configure upstream proxy "${url}": ${err instanceof Error ? err.message : err}`
+      `[IgniteRouter] Failed to configure upstream proxy "${url}": ${err instanceof Error ? err.message : err}`
     );
     return void 0;
   }
@@ -30182,15 +30334,15 @@ function buildUpstreamRequest(provider, openAiBody) {
 }
 
 // src/proxy.ts
-var BLOCKRUN_API = "https://blockrun.ai/api";
-var IMAGE_DIR = join5(homedir4(), ".openclaw", "blockrun", "images");
-var AUTO_MODEL = "blockrun/auto";
+var IgniteRouter_API = "https://IgniteRouter.ai/api";
+var IMAGE_DIR = join4(homedir3(), ".openclaw", "IgniteRouter", "images");
+var AUTO_MODEL = "igniterouter/auto";
 var ROUTING_PROFILES = /* @__PURE__ */ new Set([
-  "blockrun/eco",
+  "IgniteRouter/eco",
   "eco",
-  "blockrun/auto",
+  "igniterouter/auto",
   "auto",
-  "blockrun/premium",
+  "IgniteRouter/premium",
   "premium",
   "igniterouter/auto"
 ]);
@@ -30285,13 +30437,13 @@ function transformPaymentError(errorBody) {
             error: {
               message: "Payment signature invalid. This may be a temporary issue.",
               type: "invalid_payload",
-              help: "Try again. If this persists, reinstall ClawRouter: curl -fsSL https://blockrun.ai/ClawRouter-update | bash"
+              help: "Try again. If this persists, reinstall IgniteRouter: curl -fsSL https://IgniteRouter.ai/IgniteRouter-update | bash"
             }
           });
         }
         if (innerJson.invalidReason === "transaction_simulation_failed") {
           console.error(
-            `[ClawRouter] Solana transaction simulation failed: ${innerJson.invalidMessage || "unknown"}`
+            `[IgniteRouter] Solana transaction simulation failed: ${innerJson.invalidMessage || "unknown"}`
           );
           return JSON.stringify({
             error: {
@@ -30318,7 +30470,7 @@ function transformPaymentError(errorBody) {
         });
       }
       if (debugLower.includes("transaction_simulation_failed") || debugLower.includes("simulation")) {
-        console.error(`[ClawRouter] Solana transaction simulation failed: ${parsed.debug}`);
+        proxyLog.error(` Solana transaction simulation failed: ${parsed.debug}`);
         return JSON.stringify({
           error: {
             message: "Solana payment simulation failed. Retrying with a different model.",
@@ -30332,7 +30484,7 @@ function transformPaymentError(errorBody) {
           error: {
             message: "Solana payment signature invalid.",
             type: "invalid_payload",
-            help: "Try again. If this persists, reinstall ClawRouter: curl -fsSL https://blockrun.ai/ClawRouter-update | bash"
+            help: "Try again. If this persists, reinstall IgniteRouter: curl -fsSL https://IgniteRouter.ai/IgniteRouter-update | bash"
           }
         });
       }
@@ -30346,7 +30498,7 @@ function transformPaymentError(errorBody) {
         });
       }
       console.error(
-        `[ClawRouter] Solana payment verification failed: ${parsed.debug} payer=${wallet}`
+        `[IgniteRouter] Solana payment verification failed: ${parsed.debug} payer=${wallet}`
       );
       return JSON.stringify({
         error: {
@@ -30418,11 +30570,11 @@ function isRateLimited(modelId) {
 }
 function markRateLimited(modelId) {
   rateLimitedModels.set(modelId, Date.now());
-  console.log(`[ClawRouter] Model ${modelId} rate-limited, will deprioritize for 60s`);
+  proxyLog.info(` Model ${modelId} rate-limited, will deprioritize for 60s`);
 }
 function markOverloaded(modelId) {
   overloadedModels.set(modelId, Date.now());
-  console.log(`[ClawRouter] Model ${modelId} overloaded, will deprioritize for 15s`);
+  proxyLog.info(` Model ${modelId} overloaded, will deprioritize for 15s`);
 }
 function isOverloaded(modelId) {
   const hitTime = overloadedModels.get(modelId);
@@ -30451,7 +30603,7 @@ function canWrite(res) {
 function safeWrite(res, data) {
   if (!canWrite(res)) {
     const bytes = typeof data === "string" ? Buffer.byteLength(data) : data.length;
-    console.warn(`[ClawRouter] safeWrite: socket not writable, dropping ${bytes} bytes`);
+    proxyLog.warn(` safeWrite: socket not writable, dropping ${bytes} bytes`);
     return false;
   }
   return res.write(data);
@@ -30728,8 +30880,8 @@ function normalizeMessagesForThinking(messages) {
 }
 function debrandSystemMessages(messages, resolvedModel) {
   const PROFILE_NAMES = ["auto", "free", "eco", "premium"];
-  const profilePattern = new RegExp(`\\bblockrun/(${PROFILE_NAMES.join("|")})\\b`, "gi");
-  const prefixPattern = /\bblockrun\/(?=[a-z])/gi;
+  const profilePattern = new RegExp(`\\bIgniteRouter/(${PROFILE_NAMES.join("|")})\\b`, "gi");
+  const prefixPattern = /\bIgniteRouter\/(?=[a-z])/gi;
   let hasChanges = false;
   const result = messages.map((msg) => {
     if (msg.role !== "system" || typeof msg.content !== "string") return msg;
@@ -30759,7 +30911,7 @@ function truncateMessages(messages) {
   const truncatedConversation = conversationMsgs.slice(-maxConversation);
   const result = [...systemMsgs, ...truncatedConversation];
   console.log(
-    `[ClawRouter] Truncated messages: ${messages.length} \u2192 ${result.length} (kept ${systemMsgs.length} system + ${truncatedConversation.length} recent)`
+    `[IgniteRouter] Truncated messages: ${messages.length} \u2192 ${result.length} (kept ${systemMsgs.length} system + ${truncatedConversation.length} recent)`
   );
   return {
     messages: result,
@@ -30793,7 +30945,7 @@ function estimateTokenCount(messages) {
 }
 function buildModelPricing() {
   const map = /* @__PURE__ */ new Map();
-  for (const m of BLOCKRUN_MODELS) {
+  for (const m of IgniteRouter_MODELS) {
     if (m.id === AUTO_MODEL) continue;
     const promoPrice = getActivePromoPrice(m);
     map.set(m.id, {
@@ -30814,7 +30966,7 @@ function buildProxyModelList(createdAt = Math.floor(Date.now() / 1e3)) {
     id: model.id,
     object: "model",
     created: createdAt,
-    owned_by: model.id.includes("/") ? model.id.split("/")[0] ?? "blockrun" : "blockrun"
+    owned_by: model.id.includes("/") ? model.id.split("/")[0] ?? "IgniteRouter" : "IgniteRouter"
   }));
 }
 function mergeRoutingConfig(overrides) {
@@ -30829,7 +30981,7 @@ function mergeRoutingConfig(overrides) {
   };
 }
 function estimateAmount(modelId, bodyLength, maxTokens) {
-  const model = BLOCKRUN_MODELS.find((m) => m.id === modelId);
+  const model = IgniteRouter_MODELS.find((m) => m.id === modelId);
   if (!model) return void 0;
   let costUsd;
   const promoPrice = getActivePromoPrice(model);
@@ -30873,7 +31025,7 @@ async function proxyPartnerRequest(req, res, apiBase) {
   for await (const chunk of req) {
     bodyChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
-  const body = Buffer.concat(bodyChunks);
+  let body = Buffer.concat(bodyChunks);
   const headers = {};
   for (const [key, value] of Object.entries(req.headers)) {
     if (key === "host" || key === "connection" || key === "transfer-encoding" || key === "content-length")
@@ -30882,7 +31034,7 @@ async function proxyPartnerRequest(req, res, apiBase) {
   }
   if (!headers["content-type"]) headers["content-type"] = "application/json";
   headers["user-agent"] = USER_AGENT;
-  console.log(`[IgniteRouter] Partner request: ${req.method} ${req.url}`);
+  proxyLog.info(` Partner request: ${req.method} ${req.url}`);
   const upstream = await fetch(upstreamUrl, {
     method: req.method ?? "POST",
     headers,
@@ -30902,7 +31054,7 @@ async function proxyPartnerRequest(req, res, apiBase) {
   }
   res.end();
   const latencyMs = Date.now() - startTime;
-  console.log(`[IgniteRouter] Partner response: ${upstream.status} (${latencyMs}ms)`);
+  proxyLog.info(` Partner response: ${upstream.status} (${latencyMs}ms)`);
   logUsage({
     timestamp: (/* @__PURE__ */ new Date()).toISOString(),
     model: "partner",
@@ -30917,7 +31069,7 @@ async function proxyPartnerRequest(req, res, apiBase) {
   });
 }
 function readImageFileAsDataUri(filePath) {
-  const resolved = filePath.startsWith("~/") ? join5(homedir4(), filePath.slice(2)) : filePath;
+  const resolved = filePath.startsWith("~/") ? join4(homedir3(), filePath.slice(2)) : filePath;
   if (!existsSync(resolved)) {
     throw new Error(`Image file not found: ${resolved}`);
   }
@@ -30963,9 +31115,9 @@ async function uploadDataUriToHost(dataUri) {
 async function startProxy(options) {
   const upstreamProxy = await applyUpstreamProxy(options.upstreamProxy);
   if (upstreamProxy) {
-    console.log(`[IgniteRouter] Upstream proxy: ${upstreamProxy}`);
+    proxyLog.info(` Upstream proxy: ${upstreamProxy}`);
   }
-  const apiBase = options.apiBase ?? BLOCKRUN_API;
+  const apiBase = options.apiBase ?? IgniteRouter_API;
   const listenPort = options.port ?? getProxyPort();
   const existingProxy = await checkExistingProxy(listenPort);
   if (existingProxy) {
@@ -30991,19 +31143,19 @@ async function startProxy(options) {
   const connections = /* @__PURE__ */ new Set();
   const server = createServer(async (req, res) => {
     req.on("error", (err) => {
-      console.error(`[IgniteRouter] Request stream error: ${err.message}`);
+      proxyLog.error(` Request stream error: ${err.message}`);
     });
     res.on("error", (err) => {
-      console.error(`[IgniteRouter] Response stream error: ${err.message}`);
+      proxyLog.error(` Response stream error: ${err.message}`);
     });
     finished(res, (err) => {
       if (err && err.code !== "ERR_STREAM_DESTROYED") {
-        console.error(`[IgniteRouter] Response finished with error: ${err.message}`);
+        proxyLog.error(` Response finished with error: ${err.message}`);
       }
     });
     finished(req, (err) => {
       if (err && err.code !== "ERR_STREAM_DESTROYED") {
-        console.error(`[IgniteRouter] Request finished with error: ${err.message}`);
+        proxyLog.error(` Request finished with error: ${err.message}`);
       }
     });
     if (req.url === "/health" || req.url?.startsWith("/health?")) {
@@ -31103,7 +31255,7 @@ async function startProxy(options) {
         res.end("Bad request");
         return;
       }
-      const filePath = join5(IMAGE_DIR, filename);
+      const filePath = join4(IMAGE_DIR, filename);
       try {
         const s = await fsStat(filePath);
         if (!s.isFile()) throw new Error("not a file");
@@ -31164,7 +31316,7 @@ async function startProxy(options) {
           return;
         }
         if (result.data?.length) {
-          await mkdir2(IMAGE_DIR, { recursive: true });
+          await mkdir(IMAGE_DIR, { recursive: true });
           const port2 = server.address()?.port ?? 8402;
           for (const img of result.data) {
             const dataUriMatch = img.url?.match(/^data:(image\/\w+);base64,(.+)$/);
@@ -31172,9 +31324,9 @@ async function startProxy(options) {
               const [, mimeType, b64] = dataUriMatch;
               const ext = mimeType === "image/jpeg" ? "jpg" : mimeType.split("/")[1] ?? "png";
               const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
-              await writeFile(join5(IMAGE_DIR, filename), Buffer.from(b64, "base64"));
+              await writeFile(join4(IMAGE_DIR, filename), Buffer.from(b64, "base64"));
               img.url = `http://localhost:${port2}/images/${filename}`;
-              console.log(`[IgniteRouter] Image saved \u2192 ${img.url}`);
+              proxyLog.info(` Image saved \u2192 ${img.url}`);
             } else if (img.url?.startsWith("https://") || img.url?.startsWith("http://")) {
               try {
                 const imgResp = await fetch(img.url);
@@ -31183,9 +31335,9 @@ async function startProxy(options) {
                   const ext = contentType.includes("jpeg") || contentType.includes("jpg") ? "jpg" : contentType.includes("webp") ? "webp" : "png";
                   const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
                   const buf = Buffer.from(await imgResp.arrayBuffer());
-                  await writeFile(join5(IMAGE_DIR, filename), buf);
+                  await writeFile(join4(IMAGE_DIR, filename), buf);
                   img.url = `http://localhost:${port2}/images/${filename}`;
-                  console.log(`[IgniteRouter] Image downloaded & saved \u2192 ${img.url}`);
+                  proxyLog.info(` Image downloaded & saved \u2192 ${img.url}`);
                 }
               } catch (downloadErr) {
                 console.warn(
@@ -31209,7 +31361,7 @@ async function startProxy(options) {
         res.end(JSON.stringify(result));
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[IgniteRouter] Image generation error: ${msg}`);
+        proxyLog.error(` Image generation error: ${msg}`);
         if (!res.headersSent) {
           res.writeHead(502, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "Image generation failed", details: msg }));
@@ -31245,7 +31397,7 @@ async function startProxy(options) {
             );
           } else {
             parsed[field] = readImageFileAsDataUri(val);
-            console.log(`[IgniteRouter] img2img: read ${field} file \u2192 data URI`);
+            proxyLog.info(` img2img: read ${field} file \u2192 data URI`);
           }
         }
         if (!parsed.model) parsed.model = "openai/gpt-image-1";
@@ -31279,7 +31431,7 @@ async function startProxy(options) {
           return;
         }
         if (result.data?.length) {
-          await mkdir2(IMAGE_DIR, { recursive: true });
+          await mkdir(IMAGE_DIR, { recursive: true });
           const port2 = server.address()?.port ?? 8402;
           for (const img of result.data) {
             const dataUriMatch = img.url?.match(/^data:(image\/\w+);base64,(.+)$/);
@@ -31287,9 +31439,9 @@ async function startProxy(options) {
               const [, mimeType, b64] = dataUriMatch;
               const ext = mimeType === "image/jpeg" ? "jpg" : mimeType.split("/")[1] ?? "png";
               const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
-              await writeFile(join5(IMAGE_DIR, filename), Buffer.from(b64, "base64"));
+              await writeFile(join4(IMAGE_DIR, filename), Buffer.from(b64, "base64"));
               img.url = `http://localhost:${port2}/images/${filename}`;
-              console.log(`[IgniteRouter] Image saved \u2192 ${img.url}`);
+              proxyLog.info(` Image saved \u2192 ${img.url}`);
             } else if (img.url?.startsWith("https://") || img.url?.startsWith("http://")) {
               try {
                 const imgResp = await fetch(img.url);
@@ -31298,9 +31450,9 @@ async function startProxy(options) {
                   const ext = contentType.includes("jpeg") || contentType.includes("jpg") ? "jpg" : contentType.includes("webp") ? "webp" : "png";
                   const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
                   const buf = Buffer.from(await imgResp.arrayBuffer());
-                  await writeFile(join5(IMAGE_DIR, filename), buf);
+                  await writeFile(join4(IMAGE_DIR, filename), buf);
                   img.url = `http://localhost:${port2}/images/${filename}`;
-                  console.log(`[IgniteRouter] Image downloaded & saved \u2192 ${img.url}`);
+                  proxyLog.info(` Image downloaded & saved \u2192 ${img.url}`);
                 }
               } catch (downloadErr) {
                 console.warn(
@@ -31324,7 +31476,7 @@ async function startProxy(options) {
         res.end(JSON.stringify(result));
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[IgniteRouter] Image editing error: ${msg}`);
+        proxyLog.error(` Image editing error: ${msg}`);
         if (!res.headersSent) {
           res.writeHead(502, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "Image editing failed", details: msg }));
@@ -31394,7 +31546,7 @@ async function startProxy(options) {
         if (err.code === "EADDRINUSE") {
           const existingProxy2 = await checkExistingProxy(listenPort);
           if (existingProxy2) {
-            console.log(`[IgniteRouter] Existing proxy detected on port ${listenPort}, reusing`);
+            proxyLog.info(` Existing proxy detected on port ${listenPort}, reusing`);
             rejectAttempt({ code: "REUSE_EXISTING" });
             return;
           }
@@ -31452,13 +31604,14 @@ async function startProxy(options) {
   const port = addr.port;
   const baseUrl = `http://127.0.0.1:${port}`;
   options.onReady?.(port);
+  proxyLog.info("Proxy started", { port, providers: options.igniteConfig?.providers?.length ?? 0 });
   checkForUpdates();
   server.on("error", (err) => {
-    console.error(`[IgniteRouter] Server runtime error: ${err.message}`);
+    proxyLog.error(` Server runtime error: ${err.message}`);
     options.onError?.(err);
   });
   server.on("clientError", (err, socket) => {
-    console.error(`[IgniteRouter] Client error: ${err.message}`);
+    proxyLog.error(` Client error: ${err.message}`);
     if (socket.writable && !socket.destroyed) {
       socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
     }
@@ -31467,13 +31620,13 @@ async function startProxy(options) {
     connections.add(socket);
     socket.setTimeout(3e5);
     socket.on("timeout", () => {
-      console.error(`[IgniteRouter] Socket timeout, destroying connection`);
+      proxyLog.error(` Socket timeout, destroying connection`);
       socket.destroy();
     });
     socket.on("end", () => {
     });
     socket.on("error", (err) => {
-      console.error(`[IgniteRouter] Socket error: ${err.message}`);
+      proxyLog.error(` Socket error: ${err.message}`);
     });
     socket.on("close", () => {
       connections.delete(socket);
@@ -31590,8 +31743,18 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
     bodyChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
   let body = Buffer.concat(bodyChunks);
+  let parsed;
+  try {
+    parsed = JSON.parse(body.toString());
+  } catch (e) {
+  }
+  proxyLog.debug("Request received", {
+    model: parsed?.model,
+    stream: parsed?.stream,
+    msgCount: parsed?.messages?.length
+  });
   const originalContextSizeKB = Math.ceil(body.length / 1024);
-  const debugMode = req.headers["x-clawrouter-debug"] !== "false";
+  const debugMode = req.headers["x-IgniteRouter-debug"] !== "false";
   let routingDecision;
   let hasTools = false;
   let hasVision = false;
@@ -31611,14 +31774,14 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
   let effectiveSessionId = sessionId;
   if (isChatCompletion && body.length > 0) {
     try {
-      const parsed = JSON.parse(body.toString());
-      isStreaming = parsed.stream === true;
-      modelId = parsed.model || "";
-      maxTokens = parsed.max_tokens || 4096;
+      const parsed2 = JSON.parse(body.toString());
+      isStreaming = parsed2.stream === true;
+      modelId = parsed2.model || "";
+      maxTokens = parsed2.max_tokens || 4096;
       let bodyModified = false;
-      const parsedMessages = Array.isArray(parsed.messages) ? parsed.messages : [];
+      const parsedMessages = Array.isArray(parsed2.messages) ? parsed2.messages : [];
       const lastUserMsg = [...parsedMessages].reverse().find((m) => m.role === "user");
-      hasTools = Array.isArray(parsed.tools) && parsed.tools.length > 0;
+      hasTools = Array.isArray(parsed2.tools) && parsed2.tools.length > 0;
       const rawLastContent = lastUserMsg?.content;
       const lastContent = typeof rawLastContent === "string" ? rawLastContent : Array.isArray(rawLastContent) ? rawLastContent.filter((b) => b.type === "text").map((b) => b.text ?? "").join(" ") : "";
       effectiveSessionId = getSessionId(req.headers) ?? deriveSessionId(parsedMessages);
@@ -31725,17 +31888,17 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
       }
       const useIgniteRouting = igniteCfg.providers && igniteCfg.providers.length > 0;
       if (useIgniteRouting) {
-        console.log(`[IgniteRouter] Using ignite routing engine with ${igniteCfg.providers.length} provider(s)`);
+        proxyLog.info("Using IgniteRouter routing engine", { providers: igniteCfg.providers.length });
         const routingContext = {
           messages: parsedMessages,
-          tools: parsed.tools,
-          requestedModel: typeof parsed.model === "string" ? parsed.model : void 0,
+          tools: parsed2.tools,
+          requestedModel: typeof parsed2.model === "string" ? parsed2.model : void 0,
           estimatedTokens: estimateTokenCount(parsedMessages),
-          needsStreaming: parsed.stream === true
+          needsStreaming: parsed2.stream === true
         };
         const igniteDecision = await route2(routingContext, igniteCfg);
         if (igniteDecision.error) {
-          console.log(`[IgniteRouter] Routing error: ${igniteDecision.error}`);
+          proxyLog.error("Routing failed \u2014 no candidates available", { error: igniteDecision.error });
           res.writeHead(400, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: { message: igniteDecision.error, type: "invalid_request_error" } }));
           return;
@@ -31755,7 +31918,7 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
         };
         const fallbackResult = await callWithFallback(igniteCandidates, (provider) => buildRequestInit(provider), { timeoutMs: options.requestTimeoutMs ?? 3e4, retryableOnly: true });
         if (!fallbackResult.success) {
-          console.log(`[IgniteRouter] All models failed: ${fallbackResult.errorSummary}`);
+          proxyLog.error("All providers failed", { tried: fallbackResult.attempts.map((a) => a.provider.id) });
           res.writeHead(503, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: { message: fallbackResult.errorSummary ?? "All models failed", type: "service_unavailable" } }));
           return;
@@ -31768,6 +31931,24 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
             }
           });
           const usedProvider = fallbackResult.usedProvider;
+          const selectedModel = usedProvider.id;
+          proxyLog.info("Request completed", {
+            model: selectedModel,
+            tier: igniteDecision.tier,
+            task: igniteDecision.taskType,
+            latencyMs: Date.now() - startTime,
+            attempts: fallbackResult.attempts.length
+          });
+          let finalResponseInputTokens = responseInputTokens ?? estimateTokenCount(parsedMessages);
+          let finalResponseOutputTokens = responseOutputTokens ?? 100;
+          const cost = estimateCost(usedProvider, finalResponseInputTokens, finalResponseOutputTokens);
+          const savings = estimateSavings(cost, igniteCfg.providers, finalResponseInputTokens, finalResponseOutputTokens);
+          proxyLog.info("Cost estimate", {
+            model: cost.modelId,
+            cost: cost.formattedCost,
+            savings: savings.formattedSavings,
+            routingOverheadMs: igniteDecision.routingOverhead?.totalRoutingMs ?? igniteDecision.latencyMs
+          });
           res.setHeader("X-IgniteRouter-Model", usedProvider.id);
           res.setHeader("X-IgniteRouter-Tier", igniteDecision.tier || "UNKNOWN");
           res.setHeader("X-IgniteRouter-Task", igniteDecision.taskType || "UNKNOWN");
@@ -31776,7 +31957,7 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
             const s = Readable.fromWeb(fallbackResult.finalResponse.body);
             finished(s, (err) => {
               if (err && err.code !== "ERR_STREAM_DESTROYED")
-                console.error(`[IgniteRouter] Stream error: ${err.message}`);
+                proxyLog.error(` Stream error: ${err.message}`);
             });
             s.pipe(res);
           } else {
@@ -31787,13 +31968,13 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
       }
       if (lastContent.startsWith("/debug")) {
         const debugPrompt = lastContent.slice("/debug".length).trim() || "hello";
-        const messages = parsed.messages;
+        const messages = parsed2.messages;
         const systemMsg2 = messages?.find((m) => m.role === "system");
         const systemPrompt2 = typeof systemMsg2?.content === "string" ? systemMsg2.content : void 0;
         const fullText = `${systemPrompt2 ?? ""} ${debugPrompt}`;
         const estimatedTokens = Math.ceil(fullText.length / 4);
-        const normalizedModel2 = typeof parsed.model === "string" ? parsed.model.trim().toLowerCase() : "";
-        const profileName = normalizedModel2.replace("blockrun/", "");
+        const normalizedModel2 = typeof parsed2.model === "string" ? parsed2.model.trim().toLowerCase() : "";
+        const profileName = normalizedModel2.replace("IgniteRouter/", "");
         const debugProfile = ["eco", "auto", "premium"].includes(profileName) ? profileName : "auto";
         const scoring = classifyByRules(
           debugPrompt,
@@ -31815,7 +31996,7 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
         const sessLine = sess ? `Session: ${sessionId.slice(0, 8)}... \u2192 pinned: ${sess.model} (${sess.requestCount} requests)` : sessionId ? `Session: ${sessionId.slice(0, 8)}... \u2192 no pinned model` : "Session: none";
         const { simpleMedium, mediumComplex, complexReasoning } = DEFAULT_ROUTING_CONFIG.scoring.tierBoundaries;
         const debugText = [
-          "ClawRouter Debug",
+          "IgniteRouter Debug",
           "",
           `Profile: ${debugProfile} | Tier: ${debugRouting.tier} | Model: ${debugRouting.model}`,
           `Confidence: ${debugRouting.confidence.toFixed(2)} | Cost: $${debugRouting.costEstimate.toFixed(4)} | Savings: ${(debugRouting.savings * 100).toFixed(0)}%`,
@@ -31834,7 +32015,7 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
           id: completionId,
           object: "chat.completion",
           created: timestamp,
-          model: "clawrouter/debug",
+          model: "IgniteRouter/debug",
           choices: [
             {
               index: 0,
@@ -31854,7 +32035,7 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
             id: completionId,
             object: "chat.completion.chunk",
             created: timestamp,
-            model: "clawrouter/debug",
+            model: "IgniteRouter/debug",
             choices: [
               {
                 index: 0,
@@ -31867,7 +32048,7 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
             id: completionId,
             object: "chat.completion.chunk",
             created: timestamp,
-            model: "clawrouter/debug",
+            model: "IgniteRouter/debug",
             choices: [{ index: 0, delta: {}, finish_reason: "stop" }]
           };
           res.write(`data: ${JSON.stringify(sseChunk)}
@@ -31882,7 +32063,7 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify(syntheticResponse));
         }
-        console.log(`[ClawRouter] /debug command \u2192 ${debugRouting.tier} | ${debugRouting.model}`);
+        proxyLog.info(` /debug command \u2192 ${debugRouting.tier} | ${debugRouting.model}`);
         return;
       }
       if (lastContent.startsWith("/imagegen")) {
@@ -31943,12 +32124,12 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
               Connection: "keep-alive"
             });
             res.write(
-              `data: ${JSON.stringify({ id: completionId, object: "chat.completion.chunk", created: timestamp, model: "clawrouter/image", choices: [{ index: 0, delta: { role: "assistant", content: errorText }, finish_reason: null }] })}
+              `data: ${JSON.stringify({ id: completionId, object: "chat.completion.chunk", created: timestamp, model: "IgniteRouter/image", choices: [{ index: 0, delta: { role: "assistant", content: errorText }, finish_reason: null }] })}
 
 `
             );
             res.write(
-              `data: ${JSON.stringify({ id: completionId, object: "chat.completion.chunk", created: timestamp, model: "clawrouter/image", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}
+              `data: ${JSON.stringify({ id: completionId, object: "chat.completion.chunk", created: timestamp, model: "IgniteRouter/image", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}
 
 `
             );
@@ -31961,7 +32142,7 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
                 id: completionId,
                 object: "chat.completion",
                 created: timestamp,
-                model: "clawrouter/image",
+                model: "IgniteRouter/image",
                 choices: [
                   {
                     index: 0,
@@ -31973,11 +32154,11 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
               })
             );
           }
-          console.log(`[ClawRouter] /imagegen command \u2192 showing usage help`);
+          proxyLog.info(` /imagegen command \u2192 showing usage help`);
           return;
         }
         console.log(
-          `[ClawRouter] /imagegen command \u2192 ${imageModel} (${imageSize}): ${imagePrompt.slice(0, 80)}...`
+          `[IgniteRouter] /imagegen command \u2192 ${imageModel} (${imageSize}): ${imagePrompt.slice(0, 80)}...`
         );
         try {
           const imageUpstreamUrl = `${apiBase}/v1/images/generations`;
@@ -31997,7 +32178,7 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
           if (!imageResponse.ok || imageResult.error) {
             const errMsg = typeof imageResult.error === "string" ? imageResult.error : imageResult.error?.message ?? `HTTP ${imageResponse.status}`;
             responseText = `Image generation failed: ${errMsg}`;
-            console.log(`[ClawRouter] /imagegen error: ${errMsg}`);
+            proxyLog.info(` /imagegen error: ${errMsg}`);
           } else {
             const images = imageResult.data ?? [];
             if (images.length === 0) {
@@ -32012,7 +32193,7 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
                       lines.push(hostedUrl);
                     } catch (uploadErr) {
                       console.error(
-                        `[ClawRouter] /imagegen: failed to upload data URI: ${uploadErr instanceof Error ? uploadErr.message : String(uploadErr)}`
+                        `[IgniteRouter] /imagegen: failed to upload data URI: ${uploadErr instanceof Error ? uploadErr.message : String(uploadErr)}`
                       );
                       lines.push(
                         "Image generated but upload failed. Try again or use --model dall-e-3."
@@ -32027,7 +32208,7 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
               lines.push("", `Model: ${imageModel} | Size: ${imageSize}`);
               responseText = lines.join("\n");
             }
-            console.log(`[IgniteRouter] /imagegen success: ${images.length} image(s) generated`);
+            proxyLog.info(` /imagegen success: ${images.length} image(s) generated`);
             const imagegenActualCost = estimateImageCost(imageModel, imageSize, 1);
             logUsage({
               timestamp: (/* @__PURE__ */ new Date()).toISOString(),
@@ -32049,12 +32230,12 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
               Connection: "keep-alive"
             });
             res.write(
-              `data: ${JSON.stringify({ id: completionId, object: "chat.completion.chunk", created: timestamp, model: "clawrouter/image", choices: [{ index: 0, delta: { role: "assistant", content: responseText }, finish_reason: null }] })}
+              `data: ${JSON.stringify({ id: completionId, object: "chat.completion.chunk", created: timestamp, model: "IgniteRouter/image", choices: [{ index: 0, delta: { role: "assistant", content: responseText }, finish_reason: null }] })}
 
 `
             );
             res.write(
-              `data: ${JSON.stringify({ id: completionId, object: "chat.completion.chunk", created: timestamp, model: "clawrouter/image", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}
+              `data: ${JSON.stringify({ id: completionId, object: "chat.completion.chunk", created: timestamp, model: "IgniteRouter/image", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}
 
 `
             );
@@ -32067,7 +32248,7 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
                 id: completionId,
                 object: "chat.completion",
                 created: timestamp,
-                model: "clawrouter/image",
+                model: "IgniteRouter/image",
                 choices: [
                   {
                     index: 0,
@@ -32081,7 +32262,7 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
           }
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
-          console.error(`[ClawRouter] /imagegen error: ${errMsg}`);
+          proxyLog.error(` /imagegen error: ${errMsg}`);
           if (!res.headersSent) {
             res.writeHead(500, { "Content-Type": "application/json" });
             res.end(
@@ -32152,12 +32333,12 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
               Connection: "keep-alive"
             });
             res.write(
-              `data: ${JSON.stringify({ id: completionId, object: "chat.completion.chunk", created: timestamp, model: "clawrouter/img2img", choices: [{ index: 0, delta: { role: "assistant", content: text }, finish_reason: null }] })}
+              `data: ${JSON.stringify({ id: completionId, object: "chat.completion.chunk", created: timestamp, model: "IgniteRouter/img2img", choices: [{ index: 0, delta: { role: "assistant", content: text }, finish_reason: null }] })}
 
 `
             );
             res.write(
-              `data: ${JSON.stringify({ id: completionId, object: "chat.completion.chunk", created: timestamp, model: "clawrouter/img2img", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}
+              `data: ${JSON.stringify({ id: completionId, object: "chat.completion.chunk", created: timestamp, model: "IgniteRouter/img2img", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}
 
 `
             );
@@ -32170,7 +32351,7 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
                 id: completionId,
                 object: "chat.completion",
                 created: timestamp,
-                model: "clawrouter/img2img",
+                model: "IgniteRouter/img2img",
                 choices: [
                   {
                     index: 0,
@@ -32198,7 +32379,7 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
           return;
         }
         console.log(
-          `[ClawRouter] /img2img \u2192 ${img2imgModel} (${img2imgSize}): ${img2imgPrompt.slice(0, 80)}`
+          `[IgniteRouter] /img2img \u2192 ${img2imgModel} (${img2imgSize}): ${img2imgPrompt.slice(0, 80)}`
         );
         try {
           const img2imgBody = JSON.stringify({
@@ -32219,7 +32400,7 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
           if (!img2imgResponse.ok || img2imgResult.error) {
             const errMsg = typeof img2imgResult.error === "string" ? img2imgResult.error : img2imgResult.error?.message ?? `HTTP ${img2imgResponse.status}`;
             responseText = `Image editing failed: ${errMsg}`;
-            console.log(`[ClawRouter] /img2img error: ${errMsg}`);
+            proxyLog.info(` /img2img error: ${errMsg}`);
           } else {
             const images = img2imgResult.data ?? [];
             if (images.length === 0) {
@@ -32234,7 +32415,7 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
                       lines.push(hostedUrl);
                     } catch (uploadErr) {
                       console.error(
-                        `[ClawRouter] /img2img: failed to upload data URI: ${uploadErr instanceof Error ? uploadErr.message : String(uploadErr)}`
+                        `[IgniteRouter] /img2img: failed to upload data URI: ${uploadErr instanceof Error ? uploadErr.message : String(uploadErr)}`
                       );
                       lines.push("Image edited but upload failed. Try again.");
                     }
@@ -32247,7 +32428,7 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
               lines.push("", `Model: ${img2imgModel} | Size: ${img2imgSize}`);
               responseText = lines.join("\n");
             }
-            console.log(`[IgniteRouter] /img2img success: ${images.length} image(s)`);
+            proxyLog.info(` /img2img success: ${images.length} image(s)`);
             const img2imgActualCost2 = estimateImageCost(img2imgModel, img2imgSize, 1);
             logUsage({
               timestamp: (/* @__PURE__ */ new Date()).toISOString(),
@@ -32263,7 +32444,7 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
           sendImg2ImgText(responseText);
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
-          console.error(`[ClawRouter] /img2img error: ${errMsg}`);
+          proxyLog.error(` /img2img error: ${errMsg}`);
           if (!res.headersSent) {
             res.writeHead(500, { "Content-Type": "application/json" });
             res.end(
@@ -32275,24 +32456,24 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
         }
         return;
       }
-      if (parsed.stream === true) {
-        parsed.stream = false;
+      if (parsed2.stream === true) {
+        parsed2.stream = false;
         bodyModified = true;
       }
-      const normalizedModel = typeof parsed.model === "string" ? parsed.model.trim().toLowerCase() : "";
+      const normalizedModel = typeof parsed2.model === "string" ? parsed2.model.trim().toLowerCase() : "";
       const resolvedModel = resolveModelAlias(normalizedModel);
       const wasAlias = resolvedModel !== normalizedModel;
       const isRoutingProfile = ROUTING_PROFILES.has(normalizedModel) || ROUTING_PROFILES.has(resolvedModel);
       if (isRoutingProfile) {
-        const profileName = resolvedModel.replace("blockrun/", "");
+        const profileName = resolvedModel.replace("IgniteRouter/", "");
         routingProfile = profileName;
       }
       console.log(
-        `[ClawRouter] Received model: "${parsed.model}" -> normalized: "${normalizedModel}"${wasAlias ? ` -> alias: "${resolvedModel}"` : ""}${routingProfile ? `, profile: ${routingProfile}` : ""}`
+        `[IgniteRouter] Received model: "${parsed2.model}" -> normalized: "${normalizedModel}"${wasAlias ? ` -> alias: "${resolvedModel}"` : ""}${routingProfile ? `, profile: ${routingProfile}` : ""}`
       );
       if (!isRoutingProfile) {
-        if (parsed.model !== resolvedModel) {
-          parsed.model = resolvedModel;
+        if (parsed2.model !== resolvedModel) {
+          parsed2.model = resolvedModel;
           bodyModified = true;
         }
         modelId = resolvedModel;
@@ -32305,10 +32486,10 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
           const prompt2 = typeof rawPrompt2 === "string" ? rawPrompt2 : Array.isArray(rawPrompt2) ? rawPrompt2.filter((b) => b.type === "text").map((b) => b.text ?? "").join(" ") : "";
           const systemMsg2 = parsedMessages.find((m) => m.role === "system");
           const systemPrompt2 = typeof systemMsg2?.content === "string" ? systemMsg2.content : void 0;
-          const tools = parsed.tools;
+          const tools = parsed2.tools;
           hasTools = Array.isArray(tools) && tools.length > 0;
           if (hasTools && tools) {
-            console.log(`[ClawRouter] Tools detected (${tools.length}), forcing agentic tiers`);
+            proxyLog.info(` Tools detected (${tools.length}), forcing agentic tiers`);
           }
           hasVision = parsedMessages.some((m) => {
             if (Array.isArray(m.content)) {
@@ -32317,7 +32498,7 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
             return false;
           });
           if (hasVision) {
-            console.log(`[ClawRouter] Vision content detected, filtering to vision-capable models`);
+            proxyLog.info(` Vision content detected, filtering to vision-capable models`);
           }
           routingDecision = route(prompt2, systemPrompt2, maxTokens, {
             ...routerOpts,
@@ -32326,7 +32507,7 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
           });
           if (hasTools && routingDecision.tier === "SIMPLE") {
             console.log(
-              `[ClawRouter] SIMPLE+tools: keeping agentic model ${routingDecision.model} (tools need reliable function-call support)`
+              `[IgniteRouter] SIMPLE+tools: keeping agentic model ${routingDecision.model} (tools need reliable function-call support)`
             );
           }
           if (existingSession2) {
@@ -32340,9 +32521,9 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
             const newRank = tierRank[routingDecision.tier] ?? 0;
             if (newRank > existingRank) {
               console.log(
-                `[ClawRouter] Session ${effectiveSessionId?.slice(0, 8)}... upgrading: ${existingSession2.tier} \u2192 ${routingDecision.tier} (${routingDecision.model})`
+                `[IgniteRouter] Session ${effectiveSessionId?.slice(0, 8)}... upgrading: ${existingSession2.tier} \u2192 ${routingDecision.tier} (${routingDecision.model})`
               );
-              parsed.model = routingDecision.model;
+              parsed2.model = routingDecision.model;
               modelId = routingDecision.model;
               bodyModified = true;
               if (effectiveSessionId) {
@@ -32354,17 +32535,17 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
               }
             } else if (routingDecision.tier === "SIMPLE") {
               console.log(
-                `[ClawRouter] Session ${effectiveSessionId?.slice(0, 8)}... SIMPLE follow-up, using cheap model: ${routingDecision.model} (bypassing pinned ${existingSession2.tier})`
+                `[IgniteRouter] Session ${effectiveSessionId?.slice(0, 8)}... SIMPLE follow-up, using cheap model: ${routingDecision.model} (bypassing pinned ${existingSession2.tier})`
               );
-              parsed.model = routingDecision.model;
+              parsed2.model = routingDecision.model;
               modelId = routingDecision.model;
               bodyModified = true;
               sessionStore.touchSession(effectiveSessionId);
             } else {
               console.log(
-                `[ClawRouter] Session ${effectiveSessionId?.slice(0, 8)}... keeping pinned model: ${existingSession2.model} (${existingSession2.tier} >= ${routingDecision.tier})`
+                `[IgniteRouter] Session ${effectiveSessionId?.slice(0, 8)}... keeping pinned model: ${existingSession2.model} (${existingSession2.tier} >= ${routingDecision.tier})`
               );
-              parsed.model = existingSession2.model;
+              parsed2.model = existingSession2.model;
               modelId = existingSession2.model;
               bodyModified = true;
               sessionStore.touchSession(effectiveSessionId);
@@ -32387,9 +32568,9 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
               );
               if (escalation) {
                 console.log(
-                  `[ClawRouter] \u26A1 3-strike escalation: ${existingSession2.model} \u2192 ${escalation.model} (${existingSession2.tier} \u2192 ${escalation.tier})`
+                  `[IgniteRouter] \u26A1 3-strike escalation: ${existingSession2.model} \u2192 ${escalation.model} (${existingSession2.tier} \u2192 ${escalation.tier})`
                 );
-                parsed.model = escalation.model;
+                parsed2.model = escalation.model;
                 modelId = escalation.model;
                 routingDecision = {
                   ...routingDecision,
@@ -32399,7 +32580,7 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
               }
             }
           } else {
-            parsed.model = routingDecision.model;
+            parsed2.model = routingDecision.model;
             modelId = routingDecision.model;
             bodyModified = true;
             if (effectiveSessionId) {
@@ -32409,7 +32590,7 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
                 routingDecision.tier
               );
               console.log(
-                `[ClawRouter] Session ${effectiveSessionId.slice(0, 8)}... pinned to model: ${routingDecision.model}`
+                `[IgniteRouter] Session ${effectiveSessionId.slice(0, 8)}... pinned to model: ${routingDecision.model}`
               );
             }
           }
@@ -32420,15 +32601,15 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
         effectiveSessionId = deriveSessionId(parsedMessages);
       }
       if (bodyModified) {
-        if (parsed.model && typeof parsed.model === "string") {
-          parsed.model = toUpstreamModelId(parsed.model);
+        if (parsed2.model && typeof parsed2.model === "string") {
+          parsed2.model = toUpstreamModelId(parsed2.model);
         }
-        body = Buffer.from(JSON.stringify(parsed));
+        body = Buffer.from(JSON.stringify(parsed2));
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      console.error(`[ClawRouter] Routing error: ${errorMsg}`);
-      console.error(`[ClawRouter] Need help? Run: npx @blockrun/clawrouter doctor`);
+      proxyLog.error(` Routing error: ${errorMsg}`);
+      proxyLog.error(` Need help? Run: npx @igniterouter/igniterouter doctor`);
       options.onError?.(new Error(`Routing failed: ${errorMsg}`));
     }
   }
@@ -32438,11 +32619,11 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
   if (autoCompress && requestSizeKB > compressionThreshold) {
     try {
       console.log(
-        `[ClawRouter] Request size ${requestSizeKB}KB exceeds threshold ${compressionThreshold}KB, applying compression...`
+        `[IgniteRouter] Request size ${requestSizeKB}KB exceeds threshold ${compressionThreshold}KB, applying compression...`
       );
-      const parsed = JSON.parse(body.toString());
-      if (parsed.messages && parsed.messages.length > 0 && shouldCompress(parsed.messages)) {
-        const compressionResult = await compressContext(parsed.messages, {
+      const parsed2 = JSON.parse(body.toString());
+      if (parsed2.messages && parsed2.messages.length > 0 && shouldCompress(parsed2.messages)) {
+        const compressionResult = await compressContext(parsed2.messages, {
           enabled: true,
           preserveRaw: false,
           // Don't need originals in proxy
@@ -32471,14 +32652,14 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
         const compressedSizeKB = Math.ceil(compressionResult.compressedChars / 1024);
         const savings = ((requestSizeKB - compressedSizeKB) / requestSizeKB * 100).toFixed(1);
         console.log(
-          `[ClawRouter] Compressed ${requestSizeKB}KB \u2192 ${compressedSizeKB}KB (${savings}% reduction)`
+          `[IgniteRouter] Compressed ${requestSizeKB}KB \u2192 ${compressedSizeKB}KB (${savings}% reduction)`
         );
-        parsed.messages = compressionResult.messages;
-        body = Buffer.from(JSON.stringify(parsed));
+        parsed2.messages = compressionResult.messages;
+        body = Buffer.from(JSON.stringify(parsed2));
       }
     } catch (err) {
       console.warn(
-        `[ClawRouter] Compression failed: ${err instanceof Error ? err.message : String(err)}`
+        `[IgniteRouter] Compression failed: ${err instanceof Error ? err.message : String(err)}`
       );
     }
   }
@@ -32490,7 +32671,7 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
   if (responseCache.shouldCache(body, reqHeaders)) {
     const cachedResponse = responseCache.get(cacheKey);
     if (cachedResponse) {
-      console.log(`[ClawRouter] Cache HIT for ${cachedResponse.model} (saved API call)`);
+      proxyLog.info(` Cache HIT for ${cachedResponse.model} (saved API call)`);
       res.writeHead(cachedResponse.status, cachedResponse.headers);
       res.end(cachedResponse.body);
       return;
@@ -32520,16 +32701,16 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
     const projectedCostUsd = runCostUsd + thisReqEstUsd;
     if (projectedCostUsd > options.maxCostPerRunUsd) {
       console.log(
-        `[ClawRouter] Cost cap exceeded for session ${effectiveSessionId.slice(0, 8)}...: projected $${projectedCostUsd.toFixed(4)} (spent $${runCostUsd.toFixed(4)} + est $${thisReqEstUsd.toFixed(4)}) > $${options.maxCostPerRunUsd} limit`
+        `[IgniteRouter] Cost cap exceeded for session ${effectiveSessionId.slice(0, 8)}...: projected $${projectedCostUsd.toFixed(4)} (spent $${runCostUsd.toFixed(4)} + est $${thisReqEstUsd.toFixed(4)}) > $${options.maxCostPerRunUsd} limit`
       );
       res.writeHead(429, {
         "Content-Type": "application/json",
-        "X-ClawRouter-Cost-Cap-Exceeded": "1"
+        "X-IgniteRouter-Cost-Cap-Exceeded": "1"
       });
       res.end(
         JSON.stringify({
           error: {
-            message: `ClawRouter cost cap exceeded: projected spend $${projectedCostUsd.toFixed(4)} (spent $${runCostUsd.toFixed(4)} + est $${thisReqEstUsd.toFixed(4)}) would exceed limit $${options.maxCostPerRunUsd}`,
+            message: `IgniteRouter cost cap exceeded: projected spend $${projectedCostUsd.toFixed(4)} (spent $${runCostUsd.toFixed(4)} + est $${thisReqEstUsd.toFixed(4)}) would exceed limit $${options.maxCostPerRunUsd}`,
             type: "cost_cap_exceeded",
             code: "cost_cap_exceeded"
           }
@@ -32544,24 +32725,24 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
     const remainingUsd = options.maxCostPerRunUsd - runCostUsd;
     const isComplexOrAgentic = hasTools || routingDecision?.tier === "COMPLEX" || routingDecision?.tier === "REASONING";
     if (isComplexOrAgentic) {
-      const canAffordAnyNonFreeModel = BLOCKRUN_MODELS.some((m) => {
+      const canAffordAnyNonFreeModel = IgniteRouter_MODELS.some((m) => {
         if (FREE_MODELS.has(m.id)) return false;
         const est = estimateAmount(m.id, body.length, maxTokens);
         return est !== void 0 && Number(est) / 1e6 <= remainingUsd;
       });
       if (!canAffordAnyNonFreeModel) {
         console.log(
-          `[ClawRouter] Budget insufficient for agentic/complex session ${effectiveSessionId.slice(0, 8)}...: $${Math.max(0, remainingUsd).toFixed(4)} remaining \u2014 blocking (silent downgrade would corrupt tool/complex responses)`
+          `[IgniteRouter] Budget insufficient for agentic/complex session ${effectiveSessionId.slice(0, 8)}...: $${Math.max(0, remainingUsd).toFixed(4)} remaining \u2014 blocking (silent downgrade would corrupt tool/complex responses)`
         );
         res.writeHead(429, {
           "Content-Type": "application/json",
-          "X-ClawRouter-Cost-Cap-Exceeded": "1",
-          "X-ClawRouter-Budget-Mode": "blocked"
+          "X-IgniteRouter-Cost-Cap-Exceeded": "1",
+          "X-IgniteRouter-Budget-Mode": "blocked"
         });
         res.end(
           JSON.stringify({
             error: {
-              message: `ClawRouter budget exhausted: $${Math.max(0, remainingUsd).toFixed(4)} remaining (limit: $${options.maxCostPerRunUsd}). Increase maxCostPerRun to continue.`,
+              message: `IgniteRouter budget exhausted: $${Math.max(0, remainingUsd).toFixed(4)} remaining (limit: $${options.maxCostPerRunUsd}). Increase maxCostPerRun to continue.`,
               type: "cost_cap_exceeded",
               code: "budget_exhausted"
             }
@@ -32575,17 +32756,17 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
       const canAfford = !est || Number(est) / 1e6 <= remainingUsd;
       if (!canAfford) {
         console.log(
-          `[ClawRouter] Budget insufficient for explicit model ${modelId} in session ${effectiveSessionId.slice(0, 8)}...: $${Math.max(0, remainingUsd).toFixed(4)} remaining \u2014 blocking (user explicitly chose ${modelId})`
+          `[IgniteRouter] Budget insufficient for explicit model ${modelId} in session ${effectiveSessionId.slice(0, 8)}...: $${Math.max(0, remainingUsd).toFixed(4)} remaining \u2014 blocking (user explicitly chose ${modelId})`
         );
         res.writeHead(429, {
           "Content-Type": "application/json",
-          "X-ClawRouter-Cost-Cap-Exceeded": "1",
-          "X-ClawRouter-Budget-Mode": "blocked"
+          "X-IgniteRouter-Cost-Cap-Exceeded": "1",
+          "X-IgniteRouter-Budget-Mode": "blocked"
         });
         res.end(
           JSON.stringify({
             error: {
-              message: `ClawRouter budget exhausted: $${Math.max(0, remainingUsd).toFixed(4)} remaining (limit: $${options.maxCostPerRunUsd}). Increase maxCostPerRun to continue using ${modelId}.`,
+              message: `IgniteRouter budget exhausted: $${Math.max(0, remainingUsd).toFixed(4)} remaining (limit: $${options.maxCostPerRunUsd}). Increase maxCostPerRun to continue using ${modelId}.`,
               type: "cost_cap_exceeded",
               code: "budget_exhausted"
             }
@@ -32659,21 +32840,21 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
       const contextExcluded = fullChain.filter((m) => !contextFiltered.includes(m));
       if (contextExcluded.length > 0) {
         console.log(
-          `[ClawRouter] Context filter (~${estimatedTotalTokens} tokens): excluded ${contextExcluded.join(", ")}`
+          `[IgniteRouter] Context filter (~${estimatedTotalTokens} tokens): excluded ${contextExcluded.join(", ")}`
         );
       }
       const excludeFiltered = filterByExcludeList(contextFiltered, excludeList);
       const excludeExcluded = contextFiltered.filter((m) => !excludeFiltered.includes(m));
       if (excludeExcluded.length > 0) {
         console.log(
-          `[ClawRouter] Exclude filter: excluded ${excludeExcluded.join(", ")} (user preference)`
+          `[IgniteRouter] Exclude filter: excluded ${excludeExcluded.join(", ")} (user preference)`
         );
       }
       let toolFiltered = filterByToolCalling(excludeFiltered, hasTools, supportsToolCalling);
       const toolExcluded = excludeFiltered.filter((m) => !toolFiltered.includes(m));
       if (toolExcluded.length > 0) {
         console.log(
-          `[ClawRouter] Tool-calling filter: excluded ${toolExcluded.join(", ")} (no structured function call support)`
+          `[IgniteRouter] Tool-calling filter: excluded ${toolExcluded.join(", ")} (no structured function call support)`
         );
       }
       const TOOL_NONCOMPLIANT_MODELS = [
@@ -32686,7 +32867,7 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
         if (compliant.length > 0 && compliant.length < toolFiltered.length) {
           const dropped = toolFiltered.filter((m) => TOOL_NONCOMPLIANT_MODELS.includes(m));
           console.log(
-            `[ClawRouter] Tool-compliance filter: excluded ${dropped.join(", ")} (unreliable tool schema handling)`
+            `[IgniteRouter] Tool-compliance filter: excluded ${dropped.join(", ")} (unreliable tool schema handling)`
           );
           toolFiltered = compliant;
         }
@@ -32695,7 +32876,7 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
       const visionExcluded = toolFiltered.filter((m) => !visionFiltered.includes(m));
       if (visionExcluded.length > 0) {
         console.log(
-          `[ClawRouter] Vision filter: excluded ${visionExcluded.join(", ")} (no vision support)`
+          `[IgniteRouter] Vision filter: excluded ${visionExcluded.join(", ")} (no vision support)`
         );
       }
       modelsToTry = visionFiltered.slice(0, MAX_FALLBACK_ATTEMPTS);
@@ -32722,11 +32903,11 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
       if (isComplexOrAgenticFilter && filteredToFreeOnly) {
         const budgetSummary = `$${Math.max(0, remainingUsd).toFixed(4)} remaining (limit: $${options.maxCostPerRunUsd})`;
         console.log(
-          `[ClawRouter] Budget filter left only free model for complex/agentic session \u2014 blocking (${budgetSummary})`
+          `[IgniteRouter] Budget filter left only free model for complex/agentic session \u2014 blocking (${budgetSummary})`
         );
         const errPayload = JSON.stringify({
           error: {
-            message: `ClawRouter budget exhausted: remaining budget (${budgetSummary}) cannot support a complex/tool request. Increase maxCostPerRun to continue.`,
+            message: `IgniteRouter budget exhausted: remaining budget (${budgetSummary}) cannot support a complex/tool request. Increase maxCostPerRun to continue.`,
             type: "cost_cap_exceeded",
             code: "budget_exhausted"
           }
@@ -32742,8 +32923,8 @@ data: [DONE]
         } else {
           res.writeHead(429, {
             "Content-Type": "application/json",
-            "X-ClawRouter-Cost-Cap-Exceeded": "1",
-            "X-ClawRouter-Budget-Mode": "blocked"
+            "X-IgniteRouter-Cost-Cap-Exceeded": "1",
+            "X-IgniteRouter-Budget-Mode": "blocked"
           });
           res.end(errPayload);
         }
@@ -32753,7 +32934,7 @@ data: [DONE]
       if (excluded.length > 0) {
         const budgetSummary = remainingUsd > 0 ? `$${remainingUsd.toFixed(4)} remaining` : `budget exhausted ($${runCostUsd.toFixed(4)}/$${options.maxCostPerRunUsd})`;
         console.log(
-          `[ClawRouter] Budget downgrade (${budgetSummary}): excluded ${excluded.join(", ")}`
+          `[IgniteRouter] Budget downgrade (${budgetSummary}): excluded ${excluded.join(", ")}`
         );
         const fromModel = excluded[0];
         const usingFree = modelsToTry.length === 1 && FREE_MODELS.has(modelsToTry[0]);
@@ -32780,7 +32961,7 @@ data: [DONE]
       if (globalController.signal.aborted) {
         throw new Error(`Request timed out after ${timeoutMs}ms`);
       }
-      console.log(`[ClawRouter] Trying model ${i + 1}/${modelsToTry.length}: ${tryModel}`);
+      proxyLog.info(` Trying model ${i + 1}/${modelsToTry.length}: ${tryModel}`);
       const modelController = new AbortController();
       const modelTimeoutId = setTimeout(() => modelController.abort(), PER_MODEL_TIMEOUT_MS);
       const combinedSignal = AbortSignal.any([globalController.signal, modelController.signal]);
@@ -32799,7 +32980,7 @@ data: [DONE]
       }
       if (!result.success && modelController.signal.aborted && !isLastAttempt) {
         console.log(
-          `[ClawRouter] Model ${tryModel} timed out after ${PER_MODEL_TIMEOUT_MS}ms, trying fallback`
+          `[IgniteRouter] Model ${tryModel} timed out after ${PER_MODEL_TIMEOUT_MS}ms, trying fallback`
         );
         recordProviderError(tryModel, "server_error");
         continue;
@@ -32807,7 +32988,7 @@ data: [DONE]
       if (result.success && result.response) {
         upstream = result.response;
         actualModelUsed = tryModel;
-        console.log(`[ClawRouter] Success with model: ${tryModel}`);
+        proxyLog.info(` Success with model: ${tryModel}`);
         if (options.maxCostPerRunUsd && effectiveSessionId && !FREE_MODELS.has(tryModel)) {
           const costEst = estimateAmount(tryModel, body.length, maxTokens);
           if (costEst) {
@@ -32835,13 +33016,13 @@ data: [DONE]
         });
         const freeIdx = modelsToTry.indexOf(FREE_MODEL);
         if (freeIdx > i + 1) {
-          console.log(`[ClawRouter] Payment error \u2014 skipping to free model: ${FREE_MODEL}`);
+          proxyLog.info(` Payment error \u2014 skipping to free model: ${FREE_MODEL}`);
           i = freeIdx - 1;
           continue;
         }
         if (freeIdx === -1) {
           modelsToTry.push(FREE_MODEL);
-          console.log(`[ClawRouter] Payment error \u2014 appending free model: ${FREE_MODEL}`);
+          proxyLog.info(` Payment error \u2014 appending free model: ${FREE_MODEL}`);
           continue;
         }
       }
@@ -32850,7 +33031,7 @@ data: [DONE]
         const isUnknownExplicitModel = isExplicitModelError && /unknown.*model|invalid.*model/i.test(result.errorBody || "");
         if (isUnknownExplicitModel) {
           console.log(
-            `[ClawRouter] Explicit model error from ${tryModel}, not falling back: ${result.errorBody?.slice(0, 100)}`
+            `[IgniteRouter] Explicit model error from ${tryModel}, not falling back: ${result.errorBody?.slice(0, 100)}`
           );
           break;
         }
@@ -32861,7 +33042,7 @@ data: [DONE]
         if (errorCat === "rate_limited") {
           if (!isLastAttempt && !globalController.signal.aborted) {
             console.log(
-              `[ClawRouter] Rate-limited on ${tryModel}, retrying in 200ms before failover`
+              `[IgniteRouter] Rate-limited on ${tryModel}, retrying in 200ms before failover`
             );
             await new Promise((resolve) => setTimeout(resolve, 200));
             if (!globalController.signal.aborted) {
@@ -32887,7 +33068,7 @@ data: [DONE]
               if (retryResult.success && retryResult.response) {
                 upstream = retryResult.response;
                 actualModelUsed = tryModel;
-                console.log(`[ClawRouter] Rate-limit retry succeeded for: ${tryModel}`);
+                proxyLog.info(` Rate-limit retry succeeded for: ${tryModel}`);
                 if (options.maxCostPerRunUsd && effectiveSessionId && tryModel !== FREE_MODEL) {
                   const costEst = estimateAmount(tryModel, body.length, maxTokens);
                   if (costEst) {
@@ -32900,14 +33081,14 @@ data: [DONE]
           }
           markRateLimited(tryModel);
           try {
-            const parsed = JSON.parse(result.errorBody || "{}");
-            if (parsed.update_available) {
+            const parsed2 = JSON.parse(result.errorBody || "{}");
+            if (parsed2.update_available) {
               console.log("");
               console.log(
-                `\x1B[33m\u2B06\uFE0F  ClawRouter ${parsed.update_available} available (you have ${VERSION})\x1B[0m`
+                `\x1B[33m\u2B06\uFE0F  IgniteRouter ${parsed2.update_available} available (you have ${VERSION})\x1B[0m`
               );
               console.log(
-                `   Run: \x1B[36mcurl -fsSL ${parsed.update_url || "https://blockrun.ai/ClawRouter-update"} | bash\x1B[0m`
+                `   Run: \x1B[36mcurl -fsSL ${parsed2.update_url || "https://IgniteRouter.ai/IgniteRouter-update"} | bash\x1B[0m`
               );
               console.log("");
             }
@@ -32917,17 +33098,17 @@ data: [DONE]
           markOverloaded(tryModel);
         } else if (errorCat === "auth_failure" || errorCat === "quota_exceeded") {
           console.log(
-            `[ClawRouter] \u{1F511} ${errorCat === "auth_failure" ? "Auth failure" : "Quota exceeded"} for ${tryModel} \u2014 check provider config`
+            `[IgniteRouter] \u{1F511} ${errorCat === "auth_failure" ? "Auth failure" : "Quota exceeded"} for ${tryModel} \u2014 check provider config`
           );
         }
         console.log(
-          `[ClawRouter] Provider error from ${tryModel}, trying fallback: ${result.errorBody?.slice(0, 100)}`
+          `[IgniteRouter] Provider error from ${tryModel}, trying fallback: ${result.errorBody?.slice(0, 100)}`
         );
         continue;
       }
       if (!result.isProviderError) {
         console.log(
-          `[ClawRouter] Non-provider error from ${tryModel}, not retrying: ${result.errorBody?.slice(0, 100)}`
+          `[IgniteRouter] Non-provider error from ${tryModel}, not retrying: ${result.errorBody?.slice(0, 100)}`
         );
       }
       break;
@@ -32938,7 +33119,7 @@ data: [DONE]
       heartbeatInterval = void 0;
     }
     if (debugMode && headersSentEarly && routingDecision) {
-      const debugComment = `: x-clawrouter-debug profile=${routingProfile ?? "auto"} tier=${routingDecision.tier} model=${actualModelUsed} agentic=${routingDecision.agenticScore?.toFixed(2) ?? "n/a"} confidence=${routingDecision.confidence.toFixed(2)} reasoning=${routingDecision.reasoning}
+      const debugComment = `: x-IgniteRouter-debug profile=${routingProfile ?? "auto"} tier=${routingDecision.tier} model=${actualModelUsed} agentic=${routingDecision.agenticScore?.toFixed(2) ?? "n/a"} confidence=${routingDecision.confidence.toFixed(2)} reasoning=${routingDecision.reasoning}
 
 `;
       safeWrite(res, debugComment);
@@ -32964,14 +33145,14 @@ data: [DONE]
       if (effectiveSessionId) {
         sessionStore.setSession(effectiveSessionId, actualModelUsed, routingDecision.tier);
         console.log(
-          `[ClawRouter] Session ${effectiveSessionId.slice(0, 8)}... updated pin to fallback: ${actualModelUsed}`
+          `[IgniteRouter] Session ${effectiveSessionId.slice(0, 8)}... updated pin to fallback: ${actualModelUsed}`
         );
       }
     }
     if (!upstream) {
       const attemptSummary = failedAttempts.length > 0 ? failedAttempts.map((a) => `${a.model} (${a.reason})`).join(", ") : "unknown";
       const structuredMessage = failedAttempts.length > 0 ? `All ${failedAttempts.length} models failed. Tried: ${attemptSummary}` : "All models in fallback chain failed";
-      console.log(`[ClawRouter] ${structuredMessage}`);
+      proxyLog.info(` ${structuredMessage}`);
       const rawErrBody = lastError?.body || structuredMessage;
       const errStatus = lastError?.status || 502;
       const transformedErr = transformPaymentError(rawErrBody);
@@ -32979,9 +33160,9 @@ data: [DONE]
       if (headersSentEarly) {
         let errPayload;
         try {
-          const parsed = JSON.parse(transformedErr);
-          if (parsed && typeof parsed === "object" && "error" in parsed) {
-            errPayload = JSON.stringify(parsed);
+          const parsed2 = JSON.parse(transformedErr);
+          if (parsed2 && typeof parsed2 === "object" && "error" in parsed2) {
+            errPayload = JSON.stringify(parsed2);
           } else {
             errPayload = JSON.stringify({
               error: { message: rawErrBody, type: "provider_error", status: errStatus }
@@ -33200,18 +33381,18 @@ data: [DONE]
       responseHeaders["x-context-used-kb"] = String(originalContextSizeKB);
       responseHeaders["x-context-limit-kb"] = String(CONTEXT_LIMIT_KB);
       if (debugMode && routingDecision) {
-        responseHeaders["x-clawrouter-profile"] = routingProfile ?? "auto";
-        responseHeaders["x-clawrouter-tier"] = routingDecision.tier;
-        responseHeaders["x-clawrouter-model"] = actualModelUsed;
-        responseHeaders["x-clawrouter-confidence"] = routingDecision.confidence.toFixed(2);
-        responseHeaders["x-clawrouter-reasoning"] = routingDecision.reasoning;
+        responseHeaders["x-IgniteRouter-profile"] = routingProfile ?? "auto";
+        responseHeaders["x-IgniteRouter-tier"] = routingDecision.tier;
+        responseHeaders["x-IgniteRouter-model"] = actualModelUsed;
+        responseHeaders["x-IgniteRouter-confidence"] = routingDecision.confidence.toFixed(2);
+        responseHeaders["x-IgniteRouter-reasoning"] = routingDecision.reasoning;
         if (routingDecision.agenticScore !== void 0) {
-          responseHeaders["x-clawrouter-agentic-score"] = routingDecision.agenticScore.toFixed(2);
+          responseHeaders["x-IgniteRouter-agentic-score"] = routingDecision.agenticScore.toFixed(2);
         }
       }
       if (routingDecision) {
-        responseHeaders["x-clawrouter-cost"] = routingDecision.costEstimate.toFixed(6);
-        responseHeaders["x-clawrouter-savings"] = `${(routingDecision.savings * 100).toFixed(0)}%`;
+        responseHeaders["x-IgniteRouter-cost"] = routingDecision.costEstimate.toFixed(6);
+        responseHeaders["x-IgniteRouter-savings"] = `${(routingDecision.savings * 100).toFixed(0)}%`;
       }
       const bodyParts = [];
       if (upstream.body) {
@@ -33223,12 +33404,12 @@ data: [DONE]
       let responseBody = Buffer.concat(bodyParts);
       if (responseBody.length > 0) {
         try {
-          const parsed = JSON.parse(responseBody.toString());
-          if (parsed.choices?.[0]?.message?.content) {
-            const stripped = stripThinkingTokens(parsed.choices[0].message.content);
-            if (stripped !== parsed.choices[0].message.content) {
-              parsed.choices[0].message.content = stripped;
-              responseBody = Buffer.from(JSON.stringify(parsed));
+          const parsed2 = JSON.parse(responseBody.toString());
+          if (parsed2.choices?.[0]?.message?.content) {
+            const stripped = stripThinkingTokens(parsed2.choices[0].message.content);
+            if (stripped !== parsed2.choices[0].message.content) {
+              parsed2.choices[0].message.content = stripped;
+              responseBody = Buffer.from(JSON.stringify(parsed2));
             }
           }
         } catch {
@@ -33236,10 +33417,10 @@ data: [DONE]
       }
       if (balanceFallbackNotice && responseBody.length > 0) {
         try {
-          const parsed = JSON.parse(responseBody.toString());
-          if (parsed.choices?.[0]?.message?.content !== void 0) {
-            parsed.choices[0].message.content = balanceFallbackNotice + parsed.choices[0].message.content;
-            responseBody = Buffer.from(JSON.stringify(parsed));
+          const parsed2 = JSON.parse(responseBody.toString());
+          if (parsed2.choices?.[0]?.message?.content !== void 0) {
+            parsed2.choices[0].message.content = balanceFallbackNotice + parsed2.choices[0].message.content;
+            responseBody = Buffer.from(JSON.stringify(parsed2));
           }
         } catch {
         }
@@ -33247,10 +33428,10 @@ data: [DONE]
       }
       if (budgetDowngradeNotice && responseBody.length > 0) {
         try {
-          const parsed = JSON.parse(responseBody.toString());
-          if (parsed.choices?.[0]?.message?.content !== void 0) {
-            parsed.choices[0].message.content = budgetDowngradeNotice + parsed.choices[0].message.content;
-            responseBody = Buffer.from(JSON.stringify(parsed));
+          const parsed2 = JSON.parse(responseBody.toString());
+          if (parsed2.choices?.[0]?.message?.content !== void 0) {
+            parsed2.choices[0].message.content = budgetDowngradeNotice + parsed2.choices[0].message.content;
+            responseBody = Buffer.from(JSON.stringify(parsed2));
           }
         } catch {
         }
@@ -33258,17 +33439,17 @@ data: [DONE]
       }
       if (actualModelUsed && responseBody.length > 0) {
         try {
-          const parsed = JSON.parse(responseBody.toString());
-          if (parsed.model !== void 0) {
-            parsed.model = actualModelUsed;
-            responseBody = Buffer.from(JSON.stringify(parsed));
+          const parsed2 = JSON.parse(responseBody.toString());
+          if (parsed2.model !== void 0) {
+            parsed2.model = actualModelUsed;
+            responseBody = Buffer.from(JSON.stringify(parsed2));
           }
         } catch {
         }
       }
       if (budgetDowngradeHeaderMode) {
-        responseHeaders["x-clawrouter-budget-downgrade"] = "1";
-        responseHeaders["x-clawrouter-budget-mode"] = budgetDowngradeHeaderMode;
+        responseHeaders["x-IgniteRouter-budget-downgrade"] = "1";
+        responseHeaders["x-IgniteRouter-budget-mode"] = budgetDowngradeHeaderMode;
         budgetDowngradeHeaderMode = void 0;
       }
       responseHeaders["content-length"] = String(responseBody.length);
@@ -33290,7 +33471,7 @@ data: [DONE]
           model: actualModelUsed
         });
         console.log(
-          `[ClawRouter] Cached response for ${actualModelUsed} (${responseBody.length} bytes)`
+          `[IgniteRouter] Cached response for ${actualModelUsed} (${responseBody.length} bytes)`
         );
       }
       try {
@@ -33312,7 +33493,7 @@ data: [DONE]
       if (events.length > 0) {
         sessionJournal.record(sessionId, events, actualModelUsed);
         console.log(
-          `[ClawRouter] Recorded ${events.length} events to session journal for session ${sessionId.slice(0, 8)}...`
+          `[IgniteRouter] Recorded ${events.length} events to session journal for session ${sessionId.slice(0, 8)}...`
         );
       }
     }
@@ -33368,8 +33549,8 @@ import {
   copyFileSync,
   renameSync
 } from "fs";
-import { homedir as homedir5 } from "os";
-import { join as join6, dirname as dirname3 } from "path";
+import { homedir as homedir4 } from "os";
+import { join as join5, dirname as dirname3 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
 
 // src/partners/registry.ts
@@ -33614,7 +33795,7 @@ function buildTool(service, proxyBaseUrl) {
     }
   }
   return {
-    name: `blockrun_${service.id}`,
+    name: `IgniteRouter_${service.id}`,
     description: [
       service.description,
       "",
@@ -33863,6 +34044,13 @@ function mergeProvider(id, provided) {
     };
   }
   const knownDefaults = KNOWN_MODELS.get(id);
+  if (knownDefaults) {
+    configLog.debug("Provider metadata from registry", {
+      id,
+      contextWindow: knownDefaults.contextWindow,
+      inputPrice: knownDefaults.inputPricePerMToken
+    });
+  }
   return {
     ...baseDefaults,
     ...knownDefaults ?? {},
@@ -33893,10 +34081,11 @@ function loadProviders(rawConfig) {
         const merged = mergeProvider(prov.id, prov);
         providers.push(merged);
       } catch (err) {
-        console.warn(`[IgniteRouter] Failed to load provider "${prov.id}":`, err);
+        configLog.warn("Skipping invalid provider", { id: prov.id, reason: err instanceof Error ? err.message : String(err) });
       }
     }
   }
+  configLog.info("Providers loaded", { count: providers.length, priority: defaultPriority });
   return { defaultPriority, providers };
 }
 
@@ -33969,16 +34158,16 @@ async function waitForProxyHealth(port, timeoutMs = 3e3) {
   }
   return false;
 }
-function installSkillsToWorkspace(logger) {
+function installSkillsToWorkspace(logger2) {
   try {
-    const packageRoot = join6(dirname3(fileURLToPath2(import.meta.url)), "..");
-    const bundledSkillsDir = join6(packageRoot, "skills");
+    const packageRoot = join5(dirname3(fileURLToPath2(import.meta.url)), "..");
+    const bundledSkillsDir = join5(packageRoot, "skills");
     if (!existsSync2(bundledSkillsDir)) {
       return;
     }
     const profile = (process["env"].OPENCLAW_PROFILE ?? "").trim().toLowerCase();
     const workspaceDirName = profile && profile !== "default" ? `workspace-${profile}` : "workspace";
-    const workspaceSkillsDir = join6(homedir5(), ".openclaw", workspaceDirName, "skills");
+    const workspaceSkillsDir = join5(homedir4(), ".openclaw", workspaceDirName, "skills");
     mkdirSync2(workspaceSkillsDir, { recursive: true });
     const INTERNAL_SKILLS = /* @__PURE__ */ new Set(["release"]);
     const entries = readdirSync(bundledSkillsDir, { withFileTypes: true });
@@ -33987,10 +34176,10 @@ function installSkillsToWorkspace(logger) {
       if (!entry.isDirectory()) continue;
       const skillName = entry.name;
       if (INTERNAL_SKILLS.has(skillName)) continue;
-      const srcSkillFile = join6(bundledSkillsDir, skillName, "SKILL.md");
+      const srcSkillFile = join5(bundledSkillsDir, skillName, "SKILL.md");
       if (!existsSync2(srcSkillFile)) continue;
-      const destDir = join6(workspaceSkillsDir, skillName);
-      const destSkillFile = join6(destDir, "SKILL.md");
+      const destDir = join5(workspaceSkillsDir, skillName);
+      const destSkillFile = join5(destDir, "SKILL.md");
       let needsUpdate = true;
       if (existsSync2(destSkillFile)) {
         try {
@@ -34007,10 +34196,10 @@ function installSkillsToWorkspace(logger) {
       }
     }
     if (installed > 0) {
-      logger.info(`Installed ${installed} skill(s) to ${workspaceSkillsDir}`);
+      logger2.info(`Installed ${installed} skill(s) to ${workspaceSkillsDir}`);
     }
   } catch (err) {
-    logger.warn(`Failed to install skills: ${err instanceof Error ? err.message : String(err)}`);
+    logger2.warn(`Failed to install skills: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 function isCompletionMode() {
@@ -34021,17 +34210,17 @@ function isGatewayMode() {
   const args = process.argv;
   return args.includes("gateway");
 }
-function injectModelsConfig(logger) {
-  const configDir = join6(homedir5(), ".openclaw");
-  const configPath = join6(configDir, "openclaw.json");
+function injectModelsConfig(logger2) {
+  const configDir = join5(homedir4(), ".openclaw");
+  const configPath = join5(configDir, "openclaw.json");
   let config = {};
   let needsWrite = false;
   if (!existsSync2(configDir)) {
     try {
       mkdirSync2(configDir, { recursive: true });
-      logger.info("Created OpenClaw config directory");
+      logger2.info("Created OpenClaw config directory");
     } catch (err) {
-      logger.info(
+      logger2.info(
         `Failed to create config dir: ${err instanceof Error ? err.message : String(err)}`
       );
       return;
@@ -34043,24 +34232,24 @@ function injectModelsConfig(logger) {
       if (content) {
         config = JSON.parse(content);
       } else {
-        logger.info("OpenClaw config is empty, initializing");
+        logger2.info("OpenClaw config is empty, initializing");
         needsWrite = true;
       }
     } catch (err) {
       const backupPath = `${configPath}.backup.${Date.now()}`;
       try {
         copyFileSync(configPath, backupPath);
-        logger.info(`Config parse failed, backed up to ${backupPath}`);
+        logger2.info(`Config parse failed, backed up to ${backupPath}`);
       } catch {
-        logger.info("Config parse failed, could not create backup");
+        logger2.info("Config parse failed, could not create backup");
       }
-      logger.info(
+      logger2.info(
         `Skipping config injection (corrupt file): ${err instanceof Error ? err.message : String(err)}`
       );
       return;
     }
   } else {
-    logger.info("OpenClaw config not found, creating");
+    logger2.info("OpenClaw config not found, creating");
     needsWrite = true;
   }
   if (!config.models) {
@@ -34082,7 +34271,7 @@ function injectModelsConfig(logger) {
       apiKey: "ignite-proxy",
       models: OPENCLAW_MODELS
     };
-    logger.info("Injected IgniteRouter provider config");
+    logger2.info("Injected IgniteRouter provider config");
     needsWrite = true;
   } else {
     const ignite = providers.ignite;
@@ -34108,10 +34297,10 @@ function injectModelsConfig(logger) {
     if (needsModelUpdate) {
       ignite.models = OPENCLAW_MODELS;
       fixed = true;
-      logger.info(`Updated models list (${OPENCLAW_MODELS.length} models)`);
+      logger2.info(`Updated models list (${OPENCLAW_MODELS.length} models)`);
     }
     if (fixed) {
-      logger.info("Fixed incomplete IgniteRouter provider config");
+      logger2.info("Fixed incomplete IgniteRouter provider config");
       needsWrite = true;
     }
   }
@@ -34133,7 +34322,7 @@ function injectModelsConfig(logger) {
   const model = defaults.model;
   if (!model.primary) {
     model.primary = "ignite/auto";
-    logger.info("Set default model to ignite/auto (first install)");
+    logger2.info("Set default model to ignite/auto (first install)");
     needsWrite = true;
   }
   const TOP_MODELS = [
@@ -34182,7 +34371,7 @@ function injectModelsConfig(logger) {
   }
   if (removedDeprecatedCount > 0) {
     needsWrite = true;
-    logger.info(`Removed ${removedDeprecatedCount} deprecated model entries from allowlist`);
+    logger2.info(`Removed ${removedDeprecatedCount} deprecated model entries from allowlist`);
   }
   let addedCount = 0;
   for (const id of TOP_MODELS) {
@@ -34194,26 +34383,26 @@ function injectModelsConfig(logger) {
   }
   if (addedCount > 0) {
     needsWrite = true;
-    logger.info(`Added ${addedCount} models to allowlist (${TOP_MODELS.length} total)`);
+    logger2.info(`Added ${addedCount} models to allowlist (${TOP_MODELS.length} total)`);
   }
   if (needsWrite) {
     try {
       const tmpPath = `${configPath}.tmp.${process.pid}`;
       writeFileSync2(tmpPath, JSON.stringify(config, null, 2));
       renameSync(tmpPath, configPath);
-      logger.info("Smart routing enabled (ignite/auto)");
+      logger2.info("Smart routing enabled (ignite/auto)");
     } catch (err) {
-      logger.info(`Failed to write config: ${err instanceof Error ? err.message : String(err)}`);
+      logger2.info(`Failed to write config: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 }
-function injectAuthProfile(logger) {
-  const agentsDir = join6(homedir5(), ".openclaw", "agents");
+function injectAuthProfile(logger2) {
+  const agentsDir = join5(homedir4(), ".openclaw", "agents");
   if (!existsSync2(agentsDir)) {
     try {
       mkdirSync2(agentsDir, { recursive: true });
     } catch (err) {
-      logger.info(
+      logger2.info(
         `Could not create agents dir: ${err instanceof Error ? err.message : String(err)}`
       );
       return;
@@ -34225,8 +34414,8 @@ function injectAuthProfile(logger) {
       agents = ["main", ...agents];
     }
     for (const agentId of agents) {
-      const authDir = join6(agentsDir, agentId, "agent");
-      const authPath = join6(authDir, "auth-profiles.json");
+      const authDir = join5(agentsDir, agentId, "agent");
+      const authPath = join5(authDir, "auth-profiles.json");
       if (!existsSync2(authDir)) {
         try {
           mkdirSync2(authDir, { recursive: true });
@@ -34258,15 +34447,15 @@ function injectAuthProfile(logger) {
       };
       try {
         writeFileSync2(authPath, JSON.stringify(store, null, 2));
-        logger.info(`Injected IgniteRouter auth profile for agent: ${agentId}`);
+        logger2.info(`Injected IgniteRouter auth profile for agent: ${agentId}`);
       } catch (err) {
-        logger.info(
+        logger2.info(
           `Could not inject auth for ${agentId}: ${err instanceof Error ? err.message : String(err)}`
         );
       }
     }
   } catch (err) {
-    logger.info(`Auth injection failed: ${err instanceof Error ? err.message : String(err)}`);
+    logger2.info(`Auth injection failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 var activeProxyHandle = null;
@@ -34535,10 +34724,10 @@ var plugin = {
 };
 var index_default = plugin;
 export {
-  BLOCKRUN_MODELS,
   DEFAULT_RETRY_CONFIG,
   DEFAULT_ROUTING_CONFIG,
   DEFAULT_SESSION_CONFIG,
+  IgniteRouter_MODELS,
   MODEL_ALIASES,
   OPENCLAW_MODELS,
   PARTNER_SERVICES,

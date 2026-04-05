@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "🧪 Testing ClawRouter Model Selection"
+echo "🧪 Testing IgniteRouter Model Selection"
 echo "======================================"
 echo ""
 
@@ -10,9 +10,9 @@ echo "→ Test 1: Fresh install (no existing config)"
 rm -rf ~/.openclaw
 mkdir -p ~/.openclaw
 
-echo "  Installing ClawRouter..."
+echo "  Installing IgniteRouter..."
 echo "  (This may take up to 2 minutes...)"
-timeout 120 openclaw plugins install @blockrun/clawrouter@latest || {
+timeout 120 openclaw plugins install @igniterouter/igniterouter@latest || {
     echo "  ❌ FAIL: Plugin install timed out after 120s"
     echo "  This suggests the plugin is still blocking during installation"
     exit 1
@@ -29,7 +29,7 @@ if [ ! -f ~/.openclaw/openclaw.json ]; then
 fi
 
 echo "  ✓ Config file exists"
-cat ~/.openclaw/openclaw.json | jq '.models.providers.blockrun | {baseUrl, api, apiKey, modelCount: (.models | length)}'
+cat ~/.openclaw/openclaw.json | jq '.models.providers.IgniteRouter | {baseUrl, api, apiKey, modelCount: (.models | length)}'
 echo ""
 
 # Test 3: Check models are available
@@ -40,8 +40,8 @@ timeout 10 openclaw models || {
 }
 echo ""
 
-# Test 4: Try to set a non-BlockRun model (simulate Chandler's use case)
-echo "→ Test 4: Switch to a non-BlockRun model"
+# Test 4: Try to set a non-IgniteRouter model (simulate Chandler's use case)
+echo "→ Test 4: Switch to a non-IgniteRouter model"
 # First, add a dummy OpenAI provider to config
 node -e "
 const fs = require('fs');
@@ -136,5 +136,6 @@ echo "Summary:"
 echo "  - Plugin installs without hanging"
 echo "  - Config is created correctly  "
 echo "  - Models are available"
-echo "  - Can switch to non-BlockRun models"
+echo "  - Can switch to non-IgniteRouter models"
 echo "  - Model selection persists after reload"
+

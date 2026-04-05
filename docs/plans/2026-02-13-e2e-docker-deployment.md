@@ -1,8 +1,8 @@
-# ClawRouter E2E Testing, Docker Validation & Deployment
+# IgniteRouter E2E Testing, Docker Validation & Deployment
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Comprehensive E2E test coverage, Docker install/uninstall validation (10 cases), and automated deployment pipeline for ClawRouter.
+**Goal:** Comprehensive E2E test coverage, Docker install/uninstall validation (10 cases), and automated deployment pipeline for IgniteRouter.
 
 **Architecture:** Three-phase approach: (1) Expand E2E tests to cover error scenarios, edge cases, and the recent fixes (504 timeout, settlement retry, large payload handling), (2) Build Docker-based installation testing covering npm global, OpenClaw plugin, upgrade/downgrade, and cleanup scenarios, (3) Automate deployment with pre-publish validation and version management.
 
@@ -320,21 +320,21 @@ allPassed =
 Run:
 
 ```bash
-BLOCKRUN_WALLET_KEY=0x... npx tsx test/test-e2e.ts
+IgniteRouter_WALLET_KEY=0x... npx tsx test/test-e2e.ts
 ```
 
 Expected output:
 
 ```
-=== ClawRouter e2e tests ===
+=== IgniteRouter e2e tests ===
 
 Starting proxy...
 Proxy ready on port 8405
   Health check ... (wallet: 0xABC...) PASS
   Non-streaming request (deepseek/deepseek-chat) ... (response: "4") PASS
   Streaming request (google/gemini-2.5-flash) ... (heartbeat=true, done=true, content="Hello") PASS
-  Smart routing: simple query (blockrun/auto → should pick cheap model) ... PASS
-  Smart routing: streaming (blockrun/auto, stream=true) ... PASS
+  Smart routing: simple query (igniterouter/auto → should pick cheap model) ... PASS
+  Smart routing: streaming (igniterouter/auto, stream=true) ... PASS
   Dedup: identical request returns cached response ... PASS
   404 for unknown path ... PASS
   413 error for oversized request (>150KB) ... (payload=160KB, status=413) PASS
@@ -375,7 +375,7 @@ large payload truncation."
 
 ## Task 2: Docker Install/Uninstall Tests (10 Cases)
 
-**Goal:** Validate ClawRouter installation, upgrade, uninstall across different methods and environments.
+**Goal:** Validate IgniteRouter installation, upgrade, uninstall across different methods and environments.
 
 **Files:**
 
@@ -448,34 +448,34 @@ test_case() {
 
 # Test 1: Fresh npm global installation
 test_fresh_install() {
-  echo "Installing @blockrun/clawrouter globally..."
-  npm install -g @blockrun/clawrouter@latest
+  echo "Installing @igniterouter/igniterouter globally..."
+  npm install -g @igniterouter/igniterouter@latest
 
-  echo "Verifying clawrouter command exists..."
-  which clawrouter || return 1
+  echo "Verifying IgniteRouter command exists..."
+  which IgniteRouter || return 1
 
   echo "Checking version..."
-  clawrouter --version || return 1
+  IgniteRouter --version || return 1
 
   echo "Verifying package is in npm global list..."
-  npm list -g @blockrun/clawrouter || return 1
+  npm list -g @igniterouter/igniterouter || return 1
 
   return 0
 }
 
 # Test 2: Uninstall verification
 test_uninstall() {
-  echo "Uninstalling @blockrun/clawrouter..."
-  npm uninstall -g @blockrun/clawrouter
+  echo "Uninstalling @igniterouter/igniterouter..."
+  npm uninstall -g @igniterouter/igniterouter
 
-  echo "Verifying clawrouter command is gone..."
-  if which clawrouter 2>/dev/null; then
-    echo "ERROR: clawrouter command still exists after uninstall"
+  echo "Verifying IgniteRouter command is gone..."
+  if which IgniteRouter 2>/dev/null; then
+    echo "ERROR: IgniteRouter command still exists after uninstall"
     return 1
   fi
 
   echo "Verifying package is not in npm global list..."
-  if npm list -g @blockrun/clawrouter 2>/dev/null; then
+  if npm list -g @igniterouter/igniterouter 2>/dev/null; then
     echo "ERROR: package still in npm list after uninstall"
     return 1
   fi
@@ -485,11 +485,11 @@ test_uninstall() {
 
 # Test 3: Reinstall after uninstall
 test_reinstall() {
-  echo "Reinstalling @blockrun/clawrouter..."
-  npm install -g @blockrun/clawrouter@latest
+  echo "Reinstalling @igniterouter/igniterouter..."
+  npm install -g @igniterouter/igniterouter@latest
 
   echo "Verifying reinstall works..."
-  clawrouter --version || return 1
+  IgniteRouter --version || return 1
 
   return 0
 }
@@ -502,11 +502,11 @@ test_openclaw_plugin_install() {
     return 0
   }
 
-  echo "Installing ClawRouter as OpenClaw plugin..."
-  openclaw plugins install @blockrun/clawrouter || return 1
+  echo "Installing IgniteRouter as OpenClaw plugin..."
+  openclaw plugins install @igniterouter/igniterouter || return 1
 
   echo "Verifying plugin is listed..."
-  openclaw plugins list | grep -q "clawrouter" || return 1
+  openclaw plugins list | grep -q "IgniteRouter" || return 1
 
   return 0
 }
@@ -518,11 +518,11 @@ test_openclaw_plugin_uninstall() {
     return 0
   fi
 
-  echo "Uninstalling ClawRouter plugin..."
-  openclaw plugins uninstall clawrouter || return 1
+  echo "Uninstalling IgniteRouter plugin..."
+  openclaw plugins uninstall IgniteRouter || return 1
 
   echo "Verifying plugin is removed..."
-  if openclaw plugins list 2>/dev/null | grep -q "clawrouter"; then
+  if openclaw plugins list 2>/dev/null | grep -q "IgniteRouter"; then
     echo "ERROR: plugin still listed after uninstall"
     return 1
   fi
@@ -533,17 +533,17 @@ test_openclaw_plugin_uninstall() {
 # Test 6: Upgrade from previous version
 test_upgrade() {
   echo "Installing older version (0.8.25)..."
-  npm install -g @blockrun/clawrouter@0.8.25
+  npm install -g @igniterouter/igniterouter@0.8.25
 
   echo "Verifying old version..."
-  local old_version=$(clawrouter --version)
+  local old_version=$(IgniteRouter --version)
   echo "Installed: $old_version"
 
   echo "Upgrading to latest..."
-  npm install -g @blockrun/clawrouter@latest
+  npm install -g @igniterouter/igniterouter@latest
 
   echo "Verifying upgrade..."
-  local new_version=$(clawrouter --version)
+  local new_version=$(IgniteRouter --version)
   echo "Upgraded to: $new_version"
 
   if [ "$old_version" = "$new_version" ]; then
@@ -557,25 +557,25 @@ test_upgrade() {
 # Test 7: Installation with custom wallet key
 test_custom_wallet() {
   echo "Setting custom wallet key..."
-  export BLOCKRUN_WALLET_KEY="0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  export IgniteRouter_WALLET_KEY="0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
   echo "Installing with wallet key..."
-  npm install -g @blockrun/clawrouter@latest
+  npm install -g @igniterouter/igniterouter@latest
 
   echo "Verifying installation..."
-  clawrouter --version || return 1
+  IgniteRouter --version || return 1
 
-  unset BLOCKRUN_WALLET_KEY
+  unset IgniteRouter_WALLET_KEY
   return 0
 }
 
 # Test 8: Verify package files exist
 test_package_files() {
-  echo "Installing @blockrun/clawrouter..."
-  npm install -g @blockrun/clawrouter@latest
+  echo "Installing @igniterouter/igniterouter..."
+  npm install -g @igniterouter/igniterouter@latest
 
   echo "Finding package installation directory..."
-  local pkg_dir=$(npm root -g)/@blockrun/clawrouter
+  local pkg_dir=$(npm root -g)/@igniterouter/igniterouter
 
   echo "Checking for required files..."
   [ -f "$pkg_dir/dist/index.js" ] || { echo "Missing dist/index.js"; return 1; }
@@ -589,14 +589,14 @@ test_package_files() {
 
 # Test 9: Version command accuracy
 test_version_command() {
-  echo "Installing @blockrun/clawrouter..."
-  npm install -g @blockrun/clawrouter@latest
+  echo "Installing @igniterouter/igniterouter..."
+  npm install -g @igniterouter/igniterouter@latest
 
   echo "Running version command..."
-  local cli_version=$(clawrouter --version)
+  local cli_version=$(IgniteRouter --version)
 
   echo "Reading package.json version..."
-  local pkg_dir=$(npm root -g)/@blockrun/clawrouter
+  local pkg_dir=$(npm root -g)/@igniterouter/igniterouter
   local pkg_version=$(node -p "require('$pkg_dir/package.json').version")
 
   echo "CLI version: $cli_version"
@@ -612,18 +612,18 @@ test_version_command() {
 
 # Test 10: Full cleanup verification
 test_full_cleanup() {
-  echo "Installing @blockrun/clawrouter..."
-  npm install -g @blockrun/clawrouter@latest
+  echo "Installing @igniterouter/igniterouter..."
+  npm install -g @igniterouter/igniterouter@latest
 
-  echo "Finding all ClawRouter files..."
-  local pkg_dir=$(npm root -g)/@blockrun/clawrouter
-  local bin_link=$(which clawrouter)
+  echo "Finding all IgniteRouter files..."
+  local pkg_dir=$(npm root -g)/@igniterouter/igniterouter
+  local bin_link=$(which IgniteRouter)
 
   echo "Package dir: $pkg_dir"
   echo "Binary link: $bin_link"
 
   echo "Uninstalling..."
-  npm uninstall -g @blockrun/clawrouter
+  npm uninstall -g @igniterouter/igniterouter
 
   echo "Verifying complete cleanup..."
   if [ -d "$pkg_dir" ]; then
@@ -642,7 +642,7 @@ test_full_cleanup() {
 
 # Run all tests
 echo "╔════════════════════════════════════════════════════════╗"
-echo "║   ClawRouter Docker Installation Test Suite          ║"
+echo "║   IgniteRouter Docker Installation Test Suite          ║"
 echo "╚════════════════════════════════════════════════════════╝"
 
 test_case "1. Fresh npm global installation" test_fresh_install
@@ -681,13 +681,13 @@ set -e
 cd "$(dirname "$0")/.."
 
 echo "🐳 Building Docker test environment for installation tests..."
-docker build -f test/Dockerfile.install-test -t clawrouter-install-test .
+docker build -f test/Dockerfile.install-test -t IgniteRouter-install-test .
 
 echo ""
 echo "🧪 Running installation test suite (10 test cases)..."
 docker run --rm \
     -v "$(pwd)/test/docker-install-tests.sh:/test.sh:ro" \
-    clawrouter-install-test \
+    IgniteRouter-install-test \
     bash -c "cp /test.sh /tmp/test.sh && chmod +x /tmp/test.sh && /tmp/test.sh"
 
 echo ""
@@ -710,14 +710,14 @@ Expected output:
 🧪 Running installation test suite (10 test cases)...
 
 ╔════════════════════════════════════════════════════════╗
-║   ClawRouter Docker Installation Test Suite          ║
+║   IgniteRouter Docker Installation Test Suite          ║
 ╚════════════════════════════════════════════════════════╝
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Test: 1. Fresh npm global installation
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Installing @blockrun/clawrouter globally...
-Verifying clawrouter command exists...
+Installing @igniterouter/igniterouter globally...
+Verifying IgniteRouter command exists...
 Checking version...
 0.8.30
 ✓ PASS
@@ -778,7 +778,7 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${GREEN}  ClawRouter Deployment Pipeline${NC}"
+echo -e "${GREEN}  IgniteRouter Deployment Pipeline${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
 # Step 1: Check git status (must be clean)
@@ -829,9 +829,9 @@ echo ""
 echo -e "${YELLOW}7. Running tests...${NC}"
 
 # Check if wallet key is set
-if [ -z "$BLOCKRUN_WALLET_KEY" ]; then
-  echo -e "${YELLOW}WARNING: BLOCKRUN_WALLET_KEY not set. Skipping E2E tests.${NC}"
-  echo "Set BLOCKRUN_WALLET_KEY to run E2E tests during deployment."
+if [ -z "$IgniteRouter_WALLET_KEY" ]; then
+  echo -e "${YELLOW}WARNING: IgniteRouter_WALLET_KEY not set. Skipping E2E tests.${NC}"
+  echo "Set IgniteRouter_WALLET_KEY to run E2E tests during deployment."
 else
   echo "Running E2E tests..."
   npx tsx test/test-e2e.ts
@@ -884,7 +884,7 @@ echo ""
 echo -e "${YELLOW}9. Updating version in source files...${NC}"
 cat > src/version.ts <<EOF
 /**
- * ClawRouter version
+ * IgniteRouter version
  * Auto-generated during deployment
  */
 export const VERSION = "$NEW_VERSION";
@@ -914,7 +914,7 @@ echo "✓ Tag v$NEW_VERSION created"
 echo ""
 echo -e "${YELLOW}13. Ready to publish${NC}"
 echo ""
-echo "Package: @blockrun/clawrouter"
+echo "Package: @igniterouter/igniterouter"
 echo "Version: $NEW_VERSION"
 echo "Registry: https://registry.npmjs.org"
 echo ""
@@ -950,7 +950,7 @@ if command -v gh &> /dev/null; then
   echo "✓ GitHub release created"
 else
   echo -e "${YELLOW}WARNING: gh CLI not found. Skipping GitHub release creation.${NC}"
-  echo "Create release manually at: https://github.com/BlockRunAI/ClawRouter/releases/new"
+  echo "Create release manually at: https://github.com/IgniteRouterAI/IgniteRouter/releases/new"
 fi
 
 echo ""
@@ -958,9 +958,9 @@ echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━
 echo -e "${GREEN}  Deployment Complete! 🎉${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
-echo "Package: @blockrun/clawrouter@$NEW_VERSION"
-echo "npm: https://www.npmjs.com/package/@blockrun/clawrouter"
-echo "GitHub: https://github.com/BlockRunAI/ClawRouter/releases/tag/v$NEW_VERSION"
+echo "Package: @igniterouter/igniterouter@$NEW_VERSION"
+echo "npm: https://www.npmjs.com/package/@igniterouter/igniterouter"
+echo "GitHub: https://github.com/IgniteRouterAI/IgniteRouter/releases/tag/v$NEW_VERSION"
 echo ""
 ```
 
@@ -1011,7 +1011,7 @@ npm run typecheck
 npm run build
 
 # Test E2E (if wallet key set)
-BLOCKRUN_WALLET_KEY=0x... npx tsx test/test-e2e.ts
+IgniteRouter_WALLET_KEY=0x... npx tsx test/test-e2e.ts
 ```
 
 ### Step 5: Document deployment process
@@ -1019,11 +1019,11 @@ BLOCKRUN_WALLET_KEY=0x... npx tsx test/test-e2e.ts
 **Create `docs/deployment.md`:**
 
 ````markdown
-# ClawRouter Deployment Guide
+# IgniteRouter Deployment Guide
 
 ## Prerequisites
 
-1. **npm account with publish access** to `@blockrun/clawrouter`
+1. **npm account with publish access** to `@igniterouter/igniterouter`
 2. **GitHub CLI (`gh`)** installed (optional, for automated release creation)
 3. **Funded wallet** for E2E tests (optional, but recommended)
 
@@ -1033,7 +1033,7 @@ BLOCKRUN_WALLET_KEY=0x... npx tsx test/test-e2e.ts
 
 ```bash
 # Set wallet key for E2E tests (optional)
-export BLOCKRUN_WALLET_KEY=0x...
+export IgniteRouter_WALLET_KEY=0x...
 
 # Run deployment script
 npm run deploy
@@ -1095,10 +1095,10 @@ gh release create v0.8.31 --title "v0.8.31" --generate-notes
 
 ## Post-Deployment Verification
 
-1. Check npm package: https://www.npmjs.com/package/@blockrun/clawrouter
-2. Verify installation: `npm install -g @blockrun/clawrouter@latest`
-3. Test version: `clawrouter --version`
-4. Check GitHub release: https://github.com/BlockRunAI/ClawRouter/releases
+1. Check npm package: https://www.npmjs.com/package/@igniterouter/igniterouter
+2. Verify installation: `npm install -g @igniterouter/igniterouter@latest`
+3. Test version: `IgniteRouter --version`
+4. Check GitHub release: https://github.com/IgniteRouterAI/IgniteRouter/releases
 
 ## Rollback
 
@@ -1114,7 +1114,7 @@ git revert HEAD
 git push origin main
 
 # Unpublish from npm (within 72 hours)
-npm unpublish @blockrun/clawrouter@0.8.31
+npm unpublish @igniterouter/igniterouter@0.8.31
 ```
 
 ## Troubleshooting
@@ -1142,7 +1142,7 @@ git checkout main
 Set wallet key:
 
 ```bash
-export BLOCKRUN_WALLET_KEY=0x...
+export IgniteRouter_WALLET_KEY=0x...
 ```
 
 Or skip E2E tests (not recommended):
@@ -1171,7 +1171,7 @@ Expected output:
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  ClawRouter Deployment Pipeline
+  IgniteRouter Deployment Pipeline
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 1. Checking git status...
@@ -1220,7 +1220,7 @@ Enter choice (1-4): 1
 
 13. Ready to publish
 
-Package: @blockrun/clawrouter
+Package: @igniterouter/igniterouter
 Version: 0.8.31
 Registry: https://registry.npmjs.org
 
@@ -1258,3 +1258,4 @@ Plan complete and saved to `docs/plans/2026-02-13-e2e-docker-deployment.md`.
 **2. Parallel Session (separate)** - Open new session with executing-plans, batch execution with checkpoints
 
 **Which approach would you prefer, Your Majesty?**
+

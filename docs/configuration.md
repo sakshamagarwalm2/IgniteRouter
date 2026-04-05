@@ -1,6 +1,6 @@
 # Configuration Reference
 
-Complete reference for ClawRouter configuration options.
+Complete reference for IgniteRouter configuration options.
 
 ## Table of Contents
 
@@ -20,51 +20,51 @@ Complete reference for ClawRouter configuration options.
 
 | Variable                    | Default                               | Description                                                              |
 | --------------------------- | ------------------------------------- | ------------------------------------------------------------------------ |
-| `BLOCKRUN_WALLET_KEY`       | -                                     | Ethereum private key (hex, 0x-prefixed). Used if no saved wallet exists. |
-| `BLOCKRUN_PROXY_PORT`       | `8402`                                | Port for the local x402 proxy server.                                    |
-| `CLAWROUTER_SOLANA_RPC_URL` | `https://api.mainnet-beta.solana.com` | Solana RPC endpoint for USDC balance checks.                             |
-| `CLAWROUTER_DISABLED`       | `false`                               | Set to `true` to disable smart routing (pass requests through as-is).    |
-| `CLAWROUTER_WORKER`         | -                                     | Set to `1` to enable Worker Mode (earn USDC by running health checks).   |
+| `IgniteRouter_WALLET_KEY`       | -                                     | Ethereum private key (hex, 0x-prefixed). Used if no saved wallet exists. |
+| `IgniteRouter_PROXY_PORT`       | `8402`                                | Port for the local x402 proxy server.                                    |
+| `IgniteRouter_SOLANA_RPC_URL` | `https://api.mainnet-beta.solana.com` | Solana RPC endpoint for USDC balance checks.                             |
+| `IgniteRouter_DISABLED`       | `false`                               | Set to `true` to disable smart routing (pass requests through as-is).    |
+| `IgniteRouter_WORKER`         | -                                     | Set to `1` to enable Worker Mode (earn USDC by running health checks).   |
 
-### BLOCKRUN_WALLET_KEY
+### IgniteRouter_WALLET_KEY
 
 The wallet private key for signing x402 micropayments.
 
 ```bash
-export BLOCKRUN_WALLET_KEY=0x...your_private_key...
+export IgniteRouter_WALLET_KEY=0x...your_private_key...
 ```
 
 **Resolution order:**
 
-1. Saved file (`~/.openclaw/blockrun/wallet.key`) — checked first
-2. `BLOCKRUN_WALLET_KEY` environment variable — used if no saved file
+1. Saved file (`~/.openclaw/IgniteRouter/wallet.key`) — checked first
+2. `IgniteRouter_WALLET_KEY` environment variable — used if no saved file
 3. Auto-generate — creates new wallet and saves to file
 
 > **Security Note:** The saved file takes priority to prevent accidentally switching wallets and losing access to funded balances.
 
-### BLOCKRUN_PROXY_PORT
+### IgniteRouter_PROXY_PORT
 
 Configure the proxy to listen on a different port:
 
 ```bash
-export BLOCKRUN_PROXY_PORT=8403
+export IgniteRouter_PROXY_PORT=8403
 openclaw gateway restart
 ```
 
 **Behavior:**
 
-- If a proxy is already running on the configured port, ClawRouter will **reuse it** instead of failing with `EADDRINUSE`
+- If a proxy is already running on the configured port, IgniteRouter will **reuse it** instead of failing with `EADDRINUSE`
 - The proxy returns the wallet address of the existing instance, not the configured wallet
 - A warning is logged if the existing proxy uses a different wallet
 
 **Valid values:** 1-65535 (integers only). Invalid values fall back to 8402.
 
-### CLAWROUTER_SOLANA_RPC_URL
+### IgniteRouter_SOLANA_RPC_URL
 
 Override the Solana RPC endpoint used for USDC balance checks (Solana chain only):
 
 ```bash
-export CLAWROUTER_SOLANA_RPC_URL=https://your-rpc-provider.com
+export IgniteRouter_SOLANA_RPC_URL=https://your-rpc-provider.com
 openclaw gateway restart
 ```
 
@@ -74,7 +74,7 @@ Public RPC may rate-limit on heavy usage. Use a dedicated RPC for production.
 
 ## Wallet Configuration
 
-ClawRouter supports **two payment chains**: Base (EVM) and Solana. Both are USDC only — no SOL or ETH accepted for payments.
+IgniteRouter supports **two payment chains**: Base (EVM) and Solana. Both are USDC only — no SOL or ETH accepted for payments.
 
 ### Check Active Wallet
 
@@ -123,10 +123,10 @@ To use a different wallet:
 
 ```bash
 # 1. Remove saved wallet
-rm ~/.openclaw/blockrun/wallet.key
+rm ~/.openclaw/IgniteRouter/wallet.key
 
 # 2. Set new wallet key
-export BLOCKRUN_WALLET_KEY=0x...
+export IgniteRouter_WALLET_KEY=0x...
 
 # 3. Restart
 openclaw gateway restart
@@ -136,15 +136,15 @@ openclaw gateway restart
 
 ```bash
 # Backup wallet key
-cp ~/.openclaw/blockrun/wallet.key ~/backup/
+cp ~/.openclaw/IgniteRouter/wallet.key ~/backup/
 
 # View wallet address from key file
-cat ~/.openclaw/blockrun/wallet.key
+cat ~/.openclaw/IgniteRouter/wallet.key
 ```
 
 ### Wallet Backup & Recovery
 
-ClawRouter generates a **BIP-39 mnemonic** on first install — stored at `~/.openclaw/blockrun/wallet.key`. This single mnemonic derives both your EVM (Base) and Solana addresses. **Back up this file before terminating any VPS or machine!**
+IgniteRouter generates a **BIP-39 mnemonic** on first install — stored at `~/.openclaw/IgniteRouter/wallet.key`. This single mnemonic derives both your EVM (Base) and Solana addresses. **Back up this file before terminating any VPS or machine!**
 
 #### Using the `/wallet` Command
 
@@ -162,27 +162,27 @@ The `/wallet export` command displays your mnemonic and keys so you can copy the
 
 ```bash
 # Option 1: Copy the key file
-cp ~/.openclaw/blockrun/wallet.key ~/backup-wallet.key
+cp ~/.openclaw/IgniteRouter/wallet.key ~/backup-wallet.key
 
 # Option 2: View mnemonic
-cat ~/.openclaw/blockrun/wallet.key
+cat ~/.openclaw/IgniteRouter/wallet.key
 ```
 
 #### Restore on a New Machine
 
 ```bash
 # Option 1: Recover from mnemonic
-npx @blockrun/clawrouter wallet recover "word1 word2 ... word12"
+npx @igniterouter/igniterouter wallet recover "word1 word2 ... word12"
 
-# Option 2: Set environment variable (before installing ClawRouter)
-export BLOCKRUN_WALLET_KEY=0x...your_private_key...
-openclaw plugins install @blockrun/clawrouter
+# Option 2: Set environment variable (before installing IgniteRouter)
+export IgniteRouter_WALLET_KEY=0x...your_private_key...
+openclaw plugins install @igniterouter/igniterouter
 
 # Option 3: Create the key file directly
-mkdir -p ~/.openclaw/blockrun
-echo "your twelve word mnemonic here" > ~/.openclaw/blockrun/wallet.key
-chmod 600 ~/.openclaw/blockrun/wallet.key
-openclaw plugins install @blockrun/clawrouter
+mkdir -p ~/.openclaw/IgniteRouter
+echo "your twelve word mnemonic here" > ~/.openclaw/IgniteRouter/wallet.key
+chmod 600 ~/.openclaw/IgniteRouter/wallet.key
+openclaw plugins install @igniterouter/igniterouter
 ```
 
 **Important:** If a saved wallet file exists, it takes priority over the environment variable. To use a different wallet, delete the existing file first.
@@ -194,7 +194,7 @@ If you lose your wallet key, **there is no way to recover it**. The wallet is se
 **Prevention tips:**
 
 - Run `/wallet export` before terminating any VPS
-- Keep a secure backup of `~/.openclaw/blockrun/wallet.key`
+- Keep a secure backup of `~/.openclaw/IgniteRouter/wallet.key`
 - For production use, consider using a hardware wallet or key management system
 
 ---
@@ -203,7 +203,7 @@ If you lose your wallet key, **there is no way to recover it**. The wallet is se
 
 ### Proxy Reuse (v0.4.1+)
 
-ClawRouter automatically detects and reuses an existing proxy on startup:
+IgniteRouter automatically detects and reuses an existing proxy on startup:
 
 ```
 Session 1: startProxy() → starts server on :8402
@@ -219,13 +219,13 @@ Session 2: startProxy() → detects existing, reuses handle
 
 ### Programmatic Usage
 
-Use ClawRouter without OpenClaw:
+Use IgniteRouter without OpenClaw:
 
 ```typescript
-import { startProxy } from "@blockrun/clawrouter";
+import { startProxy } from "@igniterouter/igniterouter";
 
 const proxy = await startProxy({
-  walletKey: process.env.BLOCKRUN_WALLET_KEY!,
+  walletKey: process.env.IgniteRouter_WALLET_KEY!,
   onReady: (port) => console.log(`Proxy on port ${port}`),
   onRouted: (d) => console.log(`${d.model} saved ${(d.savings * 100).toFixed(0)}%`),
 });
@@ -235,7 +235,7 @@ const res = await fetch(`${proxy.baseUrl}/v1/chat/completions`, {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({
-    model: "blockrun/auto",
+    model: "igniterouter/auto",
     messages: [{ role: "user", content: "What is 2+2?" }],
   }),
 });
@@ -246,11 +246,11 @@ await proxy.close();
 Or use the router directly (no proxy, no payments):
 
 ```typescript
-import { route, DEFAULT_ROUTING_CONFIG, BLOCKRUN_MODELS } from "@blockrun/clawrouter";
+import { route, DEFAULT_ROUTING_CONFIG, IgniteRouter_MODELS } from "@igniterouter/igniterouter";
 
 // Build pricing map
 const modelPricing = new Map();
-for (const m of BLOCKRUN_MODELS) {
+for (const m of IgniteRouter_MODELS) {
   modelPricing.set(m.id, { inputPrice: m.inputPrice, outputPrice: m.outputPrice });
 }
 
@@ -275,19 +275,19 @@ console.log(decision);
 All options for `startProxy()`:
 
 ```typescript
-import { startProxy } from "@blockrun/clawrouter";
+import { startProxy } from "@igniterouter/igniterouter";
 
 const proxy = await startProxy({
   walletKey: "0x...",
 
   // Port configuration
-  port: 8402, // Default: 8402 or BLOCKRUN_PROXY_PORT
+  port: 8402, // Default: 8402 or IgniteRouter_PROXY_PORT
 
   // Timeouts
   requestTimeoutMs: 180000, // 3 minutes (covers on-chain tx + LLM response)
 
   // API base (for testing)
-  apiBase: "https://blockrun.ai/api",
+  apiBase: "https://IgniteRouter.ai/api",
 
   // Callbacks
   onReady: (port) => console.log(`Proxy ready on ${port}`),
@@ -312,7 +312,7 @@ const proxy = await startProxy({
 
 ```yaml
 plugins:
-  - id: "@blockrun/clawrouter"
+  - id: "@igniterouter/igniterouter"
     config:
       # Maximum spend per session/run in USD.
       # Default: disabled (no limit)
@@ -320,11 +320,11 @@ plugins:
 
       # How to enforce the budget cap. Default: graceful
       #
-      # graceful (default): when budget runs low, ClawRouter automatically downgrades
+      # graceful (default): when budget runs low, IgniteRouter automatically downgrades
       #   to cheaper models (premium → auto → eco → free). Tasks keep running.
       #   Only returns an error if no model can serve the request at all.
       #
-      # strict: immediately returns 429 (X-ClawRouter-Cost-Cap-Exceeded: 1) once
+      # strict: immediately returns 429 (X-IgniteRouter-Cost-Cap-Exceeded: 1) once
       #   the session spend reaches the cap. Use when you need a hard budget ceiling.
       maxCostPerRunMode: graceful # or: strict
 
@@ -379,7 +379,7 @@ plugins:
 
 ### Fallback Chain
 
-When the primary model fails (rate limits, billing errors, provider outages), ClawRouter tries the next model in the fallback chain:
+When the primary model fails (rate limits, billing errors, provider outages), IgniteRouter tries the next model in the fallback chain:
 
 ```
 Request → gemini-2.5-flash (rate limited)
@@ -480,11 +480,11 @@ routing:
 For testing routing without spending USDC:
 
 ```typescript
-import { route, DEFAULT_ROUTING_CONFIG, BLOCKRUN_MODELS } from "@blockrun/clawrouter";
+import { route, DEFAULT_ROUTING_CONFIG, IgniteRouter_MODELS } from "@igniterouter/igniterouter";
 
 // Build pricing map
 const modelPricing = new Map();
-for (const m of BLOCKRUN_MODELS) {
+for (const m of IgniteRouter_MODELS) {
   modelPricing.set(m.id, { inputPrice: m.inputPrice, outputPrice: m.outputPrice });
 }
 
@@ -508,5 +508,6 @@ npx tsx test/e2e.ts
 npx tsx test/proxy-reuse.ts
 
 # Full e2e with payments (requires funded wallet)
-BLOCKRUN_WALLET_KEY=0x... npx tsx test/e2e.ts
+IgniteRouter_WALLET_KEY=0x... npx tsx test/e2e.ts
 ```
+

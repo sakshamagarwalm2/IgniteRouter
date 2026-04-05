@@ -1,7 +1,7 @@
 /**
  * Partner Service Registry
  *
- * Defines available partner APIs that can be called through ClawRouter's proxy.
+ * Defines available partner APIs that can be called through IgniteRouter's proxy.
  * Partners provide specialized data (Twitter/X, etc.) via x402 micropayments.
  * The same wallet used for LLM calls pays for partner API calls — zero extra setup.
  */
@@ -14,7 +14,7 @@ export type PartnerServiceParam = {
 };
 
 export type PartnerServiceDefinition = {
-  /** Unique service ID used in tool names: blockrun_{id} */
+  /** Unique service ID used in tool names: IgniteRouter_{id} */
   id: string;
   /** Human-readable name */
   name: string;
@@ -302,3 +302,4 @@ export const PARTNER_SERVICES: PartnerServiceDefinition[] = [
 export function getPartnerService(id: string): PartnerServiceDefinition | undefined {
   return PARTNER_SERVICES.find((s) => s.id === id);
 }
+

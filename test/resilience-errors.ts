@@ -9,7 +9,7 @@
  * - Memory pressure (concurrent large requests)
  *
  * Usage:
- *   BLOCKRUN_WALLET_KEY=0x... tsx test/resilience-errors.ts
+ *   IgniteRouter_WALLET_KEY=0x... tsx test/resilience-errors.ts
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -44,10 +44,10 @@ type TestContext = {
 };
 
 /**
- * Setup test environment with mock BlockRun API server and proxy.
+ * Setup test environment with mock IgniteRouter API server and proxy.
  */
 async function setupTestEnvironment(): Promise<TestContext> {
-  // Create mock BlockRun API server
+  // Create mock IgniteRouter API server
   const mockServer = createServer((req: IncomingMessage, res: ServerResponse) => {
     // Simple mock response for /v1/chat/completions
     if (req.url === "/v1/chat/completions" && req.method === "POST") {
@@ -318,7 +318,7 @@ async function testMemoryPressure(ctx: TestContext): Promise<void> {
 
 async function main() {
   console.log("\n╔════════════════════════════════════════════════════════════════╗");
-  console.log("║         ClawRouter Resilience Error Simulation Tests          ║");
+  console.log("║         IgniteRouter Resilience Error Simulation Tests          ║");
   console.log("╚════════════════════════════════════════════════════════════════╝");
 
   const ctx = await setupTestEnvironment();
@@ -348,3 +348,4 @@ main().catch((err) => {
   console.error("Fatal error:", err);
   process.exit(1);
 });
+

@@ -1,7 +1,7 @@
 ---
 name: x-api
-description: Look up X/Twitter user profiles via BlockRun's API. Trigger when the user asks to look up, find, or get info about X/Twitter users or handles.
-metadata: { "openclaw": { "emoji": "𝕏", "requires": { "config": ["models.providers.blockrun"] } } }
+description: Look up X/Twitter user profiles via IgniteRouter's API. Trigger when the user asks to look up, find, or get info about X/Twitter users or handles.
+metadata: { "openclaw": { "emoji": "𝕏", "requires": { "config": ["models.providers.IgniteRouter"] } } }
 ---
 
 # X/Twitter User Lookup
@@ -81,8 +81,9 @@ Also accepts a comma-separated string:
 
 ## Notes
 
-- Payment is automatic via x402 — deducted from the user's BlockRun wallet
-- If the call fails with a payment error, tell the user to fund their wallet at [blockrun.ai](https://blockrun.ai)
+- Payment is automatic via x402 — deducted from the user's IgniteRouter wallet
+- If the call fails with a payment error, tell the user to fund their wallet at [IgniteRouter.ai](https://IgniteRouter.ai)
 - Rate limit: **20 requests per hour**
 - Users in `not_found` were not charged — only found users count toward the bill
 - Data is real-time from X/Twitter via [AttentionVC](https://api.attentionvc.ai/docs)
+

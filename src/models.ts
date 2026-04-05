@@ -1,8 +1,8 @@
 /**
- * BlockRun Model Definitions for OpenClaw
+ * IgniteRouter Model Definitions for OpenClaw
  *
- * Maps BlockRun's 55+ AI models to OpenClaw's ModelDefinitionConfig format.
- * All models use the "openai-completions" API since BlockRun is OpenAI-compatible.
+ * Maps IgniteRouter's 55+ AI models to OpenClaw's ModelDefinitionConfig format.
+ * All models use the "openai-completions" API since IgniteRouter is OpenAI-compatible.
  *
  * Pricing is in USD per 1M tokens. Operators pay these rates via x402;
  * they set their own markup when reselling to end users (Phase 2).
@@ -12,7 +12,7 @@ import type { ModelDefinitionConfig, ModelProviderConfig } from "./types.js";
 
 /**
  * Model aliases for convenient shorthand access.
- * Users can type `/model claude` instead of `/model blockrun/anthropic/claude-sonnet-4-6`.
+ * Users can type `/model claude` instead of `/model igniterouter/anthropic/claude-sonnet-4-6`.
  */
 export const MODEL_ALIASES: Record<string, string> = {
   // Claude - use newest versions (4.6)
@@ -127,17 +127,17 @@ export const MODEL_ALIASES: Record<string, string> = {
   "auto-router": "auto",
   router: "auto",
 
-  // Note: auto, eco, premium are virtual routing profiles registered in BLOCKRUN_MODELS
+  // Note: auto, eco, premium are virtual routing profiles registered in IgniteRouter_MODELS
   // They don't need aliases since they're already top-level model IDs
 };
 
 /**
  * Resolve a model alias to its full model ID.
- * Also strips "blockrun/" prefix for direct model paths.
+ * Also strips "IgniteRouter/" prefix for direct model paths.
  * Examples:
  *   - "claude" -> "anthropic/claude-sonnet-4-6" (alias)
- *   - "blockrun/claude" -> "anthropic/claude-sonnet-4-6" (alias with prefix)
- *   - "blockrun/anthropic/claude-sonnet-4-6" -> "anthropic/claude-sonnet-4-6" (prefix stripped)
+ *   - "IgniteRouter/claude" -> "anthropic/claude-sonnet-4-6" (alias with prefix)
+ *   - "IgniteRouter/anthropic/claude-sonnet-4-6" -> "anthropic/claude-sonnet-4-6" (prefix stripped)
  *   - "openai/gpt-4o" -> "openai/gpt-4o" (unchanged)
  */
 export function resolveModelAlias(model: string): string {
@@ -145,14 +145,14 @@ export function resolveModelAlias(model: string): string {
   const resolved = MODEL_ALIASES[normalized];
   if (resolved) return resolved;
 
-  // Check with "blockrun/" prefix stripped
-  if (normalized.startsWith("blockrun/")) {
-    const withoutPrefix = normalized.slice("blockrun/".length);
+  // Check with "igniterouter/" prefix stripped
+  if (normalized.startsWith("igniterouter/")) {
+    const withoutPrefix = normalized.slice("igniterouter/".length);
     const resolvedWithoutPrefix = MODEL_ALIASES[withoutPrefix];
     if (resolvedWithoutPrefix) return resolvedWithoutPrefix;
 
     // Even if not an alias, strip the prefix for direct model paths
-    // e.g., "blockrun/anthropic/claude-sonnet-4-6" -> "anthropic/claude-sonnet-4-6"
+    // e.g., "igniterouter/anthropic/claude-sonnet-4-6" -> "anthropic/claude-sonnet-4-6"
     return withoutPrefix;
   }
 
@@ -164,15 +164,15 @@ export function resolveModelAlias(model: string): string {
     const resolvedWithoutPrefix = MODEL_ALIASES[withoutPrefix];
     if (resolvedWithoutPrefix) return resolvedWithoutPrefix;
 
-    // If it's a known BlockRun virtual profile (eco, auto, premium), return bare id
-    const isVirtualProfile = BLOCKRUN_MODELS.some((m) => m.id === withoutPrefix);
+    // If it's a known IgniteRouter virtual profile (eco, auto, premium), return bare id
+    const isVirtualProfile = IgniteRouter_MODELS.some((m) => m.id === withoutPrefix);
     if (isVirtualProfile) return withoutPrefix;
   }
 
   return model;
 }
 
-type BlockRunModel = {
+type IgniteRouterModel = {
   id: string;
   name: string;
   /** Model version (e.g., "4.6", "3.1", "5.2") for tracking updates */
@@ -207,9 +207,9 @@ type BlockRunModel = {
   };
 };
 
-export const BLOCKRUN_MODELS: BlockRunModel[] = [
+export const IgniteRouter_MODELS: IgniteRouterModel[] = [
   // Smart routing meta-models — proxy replaces with actual model
-  // NOTE: Model IDs are WITHOUT provider prefix (OpenClaw adds "blockrun/" automatically)
+  // NOTE: Model IDs are WITHOUT provider prefix (OpenClaw adds "IgniteRouter/" automatically)
   {
     id: "igniterouter/auto",
     name: "IgniteRouter Auto (Smart Router)",
@@ -753,7 +753,7 @@ export const BLOCKRUN_MODELS: BlockRunModel[] = [
 
   // Free models (hosted by NVIDIA, billingMode: "free" on server)
   // IDs use "free/" prefix so users see them as free in the /model picker.
-  // ClawRouter maps free/xxx → nvidia/xxx before sending to BlockRun upstream.
+  // IgniteRouter maps free/xxx → nvidia/xxx before sending to IgniteRouter upstream.
   // toolCalling intentionally omitted: structured function calling unverified.
   {
     id: "free/gpt-oss-120b",
@@ -902,7 +902,7 @@ export const BLOCKRUN_MODELS: BlockRunModel[] = [
  * Get the active flat promo price for a model, or undefined if no promo / expired.
  */
 export function getActivePromoPrice(
-  model: BlockRunModel,
+  model: IgniteRouterModel,
   now: Date = new Date(),
 ): number | undefined {
   if (!model.promo) return undefined;
@@ -913,9 +913,9 @@ export function getActivePromoPrice(
 }
 
 /**
- * Convert BlockRun model definitions to OpenClaw ModelDefinitionConfig format.
+ * Convert IgniteRouter model definitions to OpenClaw ModelDefinitionConfig format.
  */
-function toOpenClawModel(m: BlockRunModel): ModelDefinitionConfig {
+function toOpenClawModel(m: IgniteRouterModel): ModelDefinitionConfig {
   return {
     id: m.id,
     name: m.name,
@@ -939,22 +939,22 @@ function toOpenClawModel(m: BlockRunModel): ModelDefinitionConfig {
  */
 const ALIAS_MODELS: ModelDefinitionConfig[] = Object.entries(MODEL_ALIASES)
   .map(([alias, targetId]) => {
-    const target = BLOCKRUN_MODELS.find((m) => m.id === targetId);
+    const target = IgniteRouter_MODELS.find((m) => m.id === targetId);
     if (!target) return null;
     return toOpenClawModel({ ...target, id: alias, name: `${alias} → ${target.name}` });
   })
   .filter((m): m is ModelDefinitionConfig => m !== null);
 
 /**
- * All BlockRun models in OpenClaw format (including aliases).
+ * All IgniteRouter models in OpenClaw format (including aliases).
  */
 export const OPENCLAW_MODELS: ModelDefinitionConfig[] = [
-  ...BLOCKRUN_MODELS.map(toOpenClawModel),
+  ...IgniteRouter_MODELS.map(toOpenClawModel),
   ...ALIAS_MODELS,
 ];
 
 /**
- * Build a ModelProviderConfig for BlockRun.
+ * Build a ModelProviderConfig for IgniteRouter.
  *
  * @param baseUrl - The proxy's local base URL (e.g., "http://127.0.0.1:12345")
  */
@@ -972,8 +972,8 @@ export function buildProviderModels(baseUrl: string): ModelProviderConfig {
  * instead of stopping and waiting for user input.
  */
 export function isAgenticModel(modelId: string): boolean {
-  const model = BLOCKRUN_MODELS.find(
-    (m) => m.id === modelId || m.id === modelId.replace("blockrun/", ""),
+  const model = IgniteRouter_MODELS.find(
+    (m) => m.id === modelId || m.id === modelId.replace("IgniteRouter/", ""),
   );
   return model?.agentic ?? false;
 }
@@ -982,7 +982,7 @@ export function isAgenticModel(modelId: string): boolean {
  * Get all agentic-capable models.
  */
 export function getAgenticModels(): string[] {
-  return BLOCKRUN_MODELS.filter((m) => m.agentic).map((m) => m.id);
+  return IgniteRouter_MODELS.filter((m) => m.agentic).map((m) => m.id);
 }
 
 /**
@@ -991,8 +991,8 @@ export function getAgenticModels(): string[] {
  * plain text JSON, which leaks {"command":"..."} into visible chat messages.
  */
 export function supportsToolCalling(modelId: string): boolean {
-  const normalized = modelId.replace("blockrun/", "");
-  const model = BLOCKRUN_MODELS.find((m) => m.id === normalized);
+  const normalized = modelId.replace("IgniteRouter/", "");
+  const model = IgniteRouter_MODELS.find((m) => m.id === normalized);
   return model?.toolCalling ?? false;
 }
 
@@ -1001,8 +1001,8 @@ export function supportsToolCalling(modelId: string): boolean {
  * Models without this flag cannot process image_url content parts.
  */
 export function supportsVision(modelId: string): boolean {
-  const normalized = modelId.replace("blockrun/", "");
-  const model = BLOCKRUN_MODELS.find((m) => m.id === normalized);
+  const normalized = modelId.replace("IgniteRouter/", "");
+  const model = IgniteRouter_MODELS.find((m) => m.id === normalized);
   return model?.vision ?? false;
 }
 
@@ -1011,8 +1011,8 @@ export function supportsVision(modelId: string): boolean {
  * Returns undefined if model not found.
  */
 export function getModelContextWindow(modelId: string): number | undefined {
-  const normalized = modelId.replace("blockrun/", "");
-  const model = BLOCKRUN_MODELS.find((m) => m.id === normalized);
+  const normalized = modelId.replace("IgniteRouter/", "");
+  const model = IgniteRouter_MODELS.find((m) => m.id === normalized);
   return model?.contextWindow;
 }
 
@@ -1021,7 +1021,8 @@ export function getModelContextWindow(modelId: string): number | undefined {
  * Reasoning models may require reasoning_content in assistant tool_call messages.
  */
 export function isReasoningModel(modelId: string): boolean {
-  const normalized = modelId.replace("blockrun/", "");
-  const model = BLOCKRUN_MODELS.find((m) => m.id === normalized);
+  const normalized = modelId.replace("IgniteRouter/", "");
+  const model = IgniteRouter_MODELS.find((m) => m.id === normalized);
   return model?.reasoning ?? false;
 }
+

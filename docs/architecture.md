@@ -1,6 +1,6 @@
 # Architecture
 
-Technical deep-dive into ClawRouter's internals.
+Technical deep-dive into IgniteRouter's internals.
 
 ## Table of Contents
 
@@ -23,7 +23,7 @@ Technical deep-dive into ClawRouter's internals.
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                 ClawRouter Proxy (localhost)                │
+│                 IgniteRouter Proxy (localhost)                │
 │  ┌─────────────┐  ┌─────────────┐  ┌───────────────────┐   │
 │  │   Dedup     │→ │   Router    │→ │   x402 Payment    │   │
 │  │   Cache     │  │  (15-dim)   │  │  (USDC on Base    │   │
@@ -39,7 +39,7 @@ Technical deep-dive into ClawRouter's internals.
                     ┌─────────┴──────────┐
                     ▼                    ▼
 ┌────────────────────────┐  ┌────────────────────────────────┐
-│  blockrun.ai/api       │  │  sol.blockrun.ai/api           │
+│  IgniteRouter.ai/api       │  │  sol.IgniteRouter.ai/api           │
 │  (EVM / Base USDC)     │  │  (Solana USDC)                 │
 │  x402 EIP-712 signing  │  │  x402 SVM signing              │
 └────────────────────────┘  └────────────────────────────────┘
@@ -65,7 +65,7 @@ Technical deep-dive into ClawRouter's internals.
 ```
 POST /v1/chat/completions
 {
-  "model": "blockrun/auto",
+  "model": "igniterouter/auto",
   "messages": [{ "role": "user", "content": "What is 2+2?" }],
   "stream": true
 }
@@ -90,7 +90,7 @@ if (inflight) {
 }
 ```
 
-### 3. Smart Routing (if model is `blockrun/auto`)
+### 3. Smart Routing (if model is `igniterouter/auto`)
 
 ```typescript
 // Extract user's last message
@@ -152,7 +152,7 @@ if (isStreaming) {
 **Base (EVM) — EIP-712 USDC:**
 
 ```
-1. Request → blockrun.ai/api
+1. Request → IgniteRouter.ai/api
 2. ← 402 Payment Required
    {
      "x402Version": 1,
@@ -160,7 +160,7 @@ if (isStreaming) {
        "scheme": "exact",
        "network": "base",
        "maxAmountRequired": "5000",  // $0.005 USDC
-       "resource": "https://blockrun.ai/api/v1/chat/completions",
+       "resource": "https://IgniteRouter.ai/api/v1/chat/completions",
        "payTo": "0x..."
      }]
    }
@@ -172,7 +172,7 @@ if (isStreaming) {
 **Solana — SVM USDC:**
 
 ```
-1. Request → sol.blockrun.ai/api
+1. Request → sol.IgniteRouter.ai/api
 2. ← 402 Payment Required
    {
      "x402Version": 1,
@@ -180,7 +180,7 @@ if (isStreaming) {
        "scheme": "exact",
        "network": "solana",
        "maxAmountRequired": "5000",  // $0.005 USDC (6 decimals)
-       "resource": "https://sol.blockrun.ai/api/v1/chat/completions",
+       "resource": "https://sol.IgniteRouter.ai/api/v1/chat/completions",
        "payTo": "<base58 address>"
      }]
    }
@@ -217,7 +217,7 @@ for (const model of fallbackChain) {
 
 ```typescript
 // Convert non-streaming JSON to SSE format
-// (BlockRun API returns JSON, we simulate SSE)
+// (IgniteRouter API returns JSON, we simulate SSE)
 
 // Chunk 1: role
 data: {"id":"...","object":"chat.completion.chunk","choices":[{"delta":{"role":"assistant"}}]}
@@ -313,13 +313,13 @@ if (systemPrompt?.includes("json") || systemPrompt?.includes("yaml")) {
 
 ### x402 Protocol
 
-ClawRouter uses the [x402 protocol](https://x402.org) for micropayments. Both chains use the same flow; the signing step differs:
+IgniteRouter uses the [x402 protocol](https://x402.org) for micropayments. Both chains use the same flow; the signing step differs:
 
 ```
 ┌────────────┐     ┌──────────────────────┐     ┌────────────┐
-│   Client   │────▶│  BlockRun API        │────▶│  Provider  │
-│ (ClawRouter)     │  (Base: blockrun.ai  │     │ (OpenAI)   │
-└────────────┘     │   Sol: sol.blockrun) │     └────────────┘
+│   Client   │────▶│  IgniteRouter API        │────▶│  Provider  │
+│ (IgniteRouter)     │  (Base: IgniteRouter.ai  │     │ (OpenAI)   │
+└────────────┘     │   Sol: sol.IgniteRouter) │     └────────────┘
       │                  │
       │ 1. Request       │
       │─────────────────▶│
@@ -557,3 +557,4 @@ src/
 | `solana-balance.ts`  | USDC balance via Solana RPC (SPL Token), caching, retries     |
 | `payment-preauth.ts` | Pre-authorization cache (EVM; skipped for Solana)             |
 | `dedup.ts`           | SHA-256 hashing, 30s response cache                           |
+

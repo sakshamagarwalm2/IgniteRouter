@@ -27,7 +27,7 @@ async function serveTinyPng(): Promise<{ url: string; close: () => void }> {
 }
 
 describe("image HTTP download logic", () => {
-  const testDir = join(tmpdir(), `clawrouter-img-test-${process.pid}`);
+  const testDir = join(tmpdir(), `IgniteRouter-img-test-${process.pid}`);
 
   afterEach(async () => {
     await rm(testDir, { recursive: true, force: true });
@@ -105,3 +105,4 @@ describe("image HTTP download logic", () => {
     expect(resultUrl).toBe(originalUrl);
   });
 });
+

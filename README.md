@@ -7,7 +7,7 @@
 Routes each request to the right model based on task type and complexity.
 Automatic fallback if a model fails.
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-orange.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178c6?style=flat-square&logo=typescript&logoColor=white)](https://typescriptlang.org)
 [![Node](https://img.shields.io/badge/Node-20+-green.svg?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
 
@@ -28,7 +28,7 @@ IgniteRouter is a smart LLM routing plugin for [OpenClaw](https://openclaw.ai) t
 
 ---
 
-## Acknowledgments
+## Acknowledgments & Third-Party Licenses
 
 IgniteRouter stands on the shoulders of giants:
 
@@ -36,9 +36,21 @@ IgniteRouter stands on the shoulders of giants:
 
 IgniteRouter was originally forked from [ClawRouter](https://github.com/BlockRunAI/ClawRouter) by BlockRunAI. ClawRouter pioneered the concept of lightweight, local LLM routing with tiered model selection. The core routing strategies and many utilities have been adapted and extended.
 
+**License:** [MIT License](https://github.com/BlockRunAI/ClawRouter/blob/main/LICENSE)
+
 ### RouteLLM
 
 Complex prompts benefit from [RouteLLM](https://github.com/lm-sys/FastChat) by LMSYS. When RouteLLM is available locally, IgniteRouter uses it for accurate complexity scoring. The keyword fallback ensures routing always works, even without RouteLLM.
+
+**License:** [Apache License 2.0](https://github.com/lm-sys/FastChat/blob/main/LICENSE)
+
+---
+
+## License
+
+IgniteRouter is licensed under [PolyForm Noncommercial 1.0.0](LICENSE).
+
+For commercial licensing inquiries, please contact the maintainers.
 
 ---
 
@@ -244,7 +256,12 @@ npm run typecheck
 
 ## License
 
-IgniteRouter is licensed under the [Apache License 2.0](LICENSE).
+IgniteRouter is licensed under [PolyForm Noncommercial 1.0.0](LICENSE).
+
+**Third-party licenses:**
+
+- **ClawRouter:** [MIT License](https://github.com/BlockRunAI/ClawRouter/blob/main/LICENSE)
+- **RouteLLM:** [Apache License 2.0](https://github.com/lm-sys/FastChat/blob/main/LICENSE)
 
 Copyright 2026 IgniteRouter Contributors
 

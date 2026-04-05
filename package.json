@@ -28,6 +28,8 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "vitest run",
+    "test:verify": "vitest run test/verify-all.test.ts --reporter=verbose",
+    "test:verify:watch": "vitest test/verify-all.test.ts --reporter=verbose",
     "test:install": "bash test/openclaw-install.sh",
     "test:integration": "vitest run test/integration-flow.test.ts test/provider-urls.test.ts",
     "test:all": "vitest run && npm run test:install",

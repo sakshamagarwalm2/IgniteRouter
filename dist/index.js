@@ -28170,14 +28170,12 @@ async function callWithFallback(candidates, buildRequest, options) {
       const { url, init } = buildRequest(candidate.provider);
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
-      console.log(`[IgniteRouter] Calling ${candidate.provider.id} -> ${url}`);
       const response = await fetch(url, {
         ...init,
         signal: controller.signal
       });
       clearTimeout(timeout);
       const latencyMs = Date.now() - startTime;
-      console.log(`[IgniteRouter] ${candidate.provider.id} returned HTTP ${response.status}`);
       if (response.ok) {
         const text = await response.text();
         if (!text || text.trim() === "") {

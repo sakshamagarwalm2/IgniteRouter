@@ -95,7 +95,7 @@ export async function route(
     };
   }
 
-  const taskType = classifyTask(context.messages).taskType;
+  const taskType = classifyTask(context.messages, context.tools).taskType;
   const complexityResult = await scoreComplexity(
     typeof context.messages[context.messages.length - 1]?.content === "string"
       ? (context.messages[context.messages.length - 1].content as string)

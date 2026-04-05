@@ -35,9 +35,6 @@ export interface FallbackOptions {
 
 export function classifyHttpError(status: number, body?: string): FailureReason {
   if (status === 429) return "rate-limit";
-  if (status >= 500 && status <= 504 && status !== 502) {
-    if (status === 502 || status === 503 || status === 504) return "server-error";
-  }
   if (status === 500 || status === 502 || status === 503 || status === 504) return "server-error";
   if (status === 402) return "quota-exceeded";
   if (status === 403) {
@@ -90,10 +87,17 @@ export async function callWithFallback(
           continue;
         }
 
+        attempts.push({
+          provider: candidate.provider,
+          success: true,
+          statusCode: response.status,
+          latencyMs,
+        });
+
         return {
           success: true,
           attempts,
-          finalResponse: response,
+          finalResponse: new Response(text, { status: response.status, headers: response.headers }),
           usedProvider: candidate.provider,
         };
       }
@@ -135,7 +139,7 @@ export async function callWithFallback(
       const error = err as Error;
 
       let reason: FailureReason = "unknown";
-      if (error.name === "AbortError") {
+      if (error.name === "AbortError" || error.message.toLowerCase().includes("aborted") || error.message.toLowerCase().includes("timeout")) {
         reason = "timeout";
       }
 

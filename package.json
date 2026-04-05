@@ -1,12 +1,12 @@
 {
-  "name": "@blockrun/clawrouter",
-  "version": "0.12.108",
-  "description": "Smart LLM router — save 85% on inference costs. 55+ models (11 free), one wallet, x402 micropayments.",
+  "name": "igniterouter",
+  "version": "0.1.0",
+  "description": "Smart LLM router — route requests to the right model with automatic fallback",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "clawrouter": "./dist/cli.js"
+    "igniterouter": "./dist/cli.js"
   },
   "openclaw": {
     "extensions": [
@@ -31,54 +31,22 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "vitest run",
+    "test:all": "vitest run",
+    "test:unit": "vitest run src/task-classifier.test.ts src/complexity-scorer.test.ts src/user-providers.test.ts src/routing-engine.test.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
     "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "test:resilience:errors": "tsx test/resilience-errors.ts",
-    "test:resilience:stability": "DURATION_MINUTES=5 tsx test/resilience-stability.ts",
-    "test:resilience:stability:full": "DURATION_MINUTES=240 tsx test/resilience-stability.ts",
-    "test:resilience:lifecycle": "tsx test/resilience-lifecycle.ts",
-    "test:resilience:quick": "npm run test:resilience:errors && npm run test:resilience:lifecycle",
-    "test:resilience:full": "npm run test:resilience:errors && npm run test:resilience:lifecycle && npm run test:resilience:stability:full",
-    "test:e2e:tool-ids": "npm run build && tsx test/e2e-tool-id-sanitization.ts",
-    "test:docker:install": "bash test/run-docker-test.sh",
-    "test:docker:edge-cases": "bash test/docker/run-edge-cases.sh",
-    "test:docker:integration": "docker compose -f test/integration/docker-compose.yml up --build --abort-on-container-exit --exit-code-from integration"
+    "format:check": "prettier --check ."
   },
   "keywords": [
     "llm",
     "router",
     "smart-routing",
     "ai",
-    "openclaw",
-    "blockrun",
-    "x402",
-    "usdc",
-    "cost-optimization",
-    "openai",
-    "anthropic",
-    "gemini",
-    "deepseek",
-    "usdc-hackathon-winner",
-    "agentic-commerce"
+    "openclaw"
   ],
-  "author": "BlockRun <hello@blockrun.ai>",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/BlockRunAI/ClawRouter.git"
-  },
-  "dependencies": {
-    "@scure/bip32": "^2.0.1",
-    "@scure/bip39": "^1.5.0",
-    "@solana/kit": "^5.0.0",
-    "@x402/evm": "^2.8.0",
-    "@x402/fetch": "^2.8.0",
-    "@x402/svm": "^2.8.0",
-    "viem": "^2.39.3"
-  },
   "peerDependencies": {
     "openclaw": ">=2025.1.0"
   },

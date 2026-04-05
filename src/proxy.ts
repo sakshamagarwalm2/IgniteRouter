@@ -1,44 +1,27 @@
 /**
- * Local x402 Proxy Server
+ * Local Proxy Server
  *
  * Sits between OpenClaw's pi-ai (which makes standard OpenAI-format requests)
- * and BlockRun's API (which requires x402 micropayments).
+ * and BlockRun's API.
  *
  * Flow:
  *   pi-ai → http://localhost:{port}/v1/chat/completions
  *        → proxy forwards to https://blockrun.ai/api/v1/chat/completions
- *        → gets 402 → @x402/fetch signs payment → retries
  *        → streams response back to pi-ai
  *
- * Optimizations (v0.3.0):
- *   - SSE heartbeat: for streaming requests, sends headers + heartbeat immediately
- *     before the x402 flow, preventing OpenClaw's 10-15s timeout from firing.
- *   - Response dedup: hashes request bodies and caches responses for 30s,
- *     preventing double-charging when OpenClaw retries after timeout.
- *   - Smart routing: when model is "blockrun/auto", classify query and pick cheapest model.
- *   - Usage logging: log every request as JSON line to ~/.openclaw/blockrun/logs/
+ * Optimizations:
+ *   - Response dedup: hashes request bodies and caches responses for 30s
+ *   - Smart routing: when model is "ignite/auto", classify query and pick cheapest model
+ *   - Usage logging: log every request as JSON line to ~/.openclaw/ignite/logs/
  */
 
-import { AsyncLocalStorage } from "node:async_hooks";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-
-// Per-request payment tracking via AsyncLocalStorage (safe for concurrent requests).
-// The x402 onAfterPaymentCreation hook writes the actual payment amount into the
-// request-scoped store, and the logging code reads it after payFetch completes.
-const paymentStore = new AsyncLocalStorage<{ amountUsd: number }>();
 import { finished } from "node:stream";
 import type { AddressInfo } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdir, writeFile, readFile, stat as fsStat } from "node:fs/promises";
 import { readFileSync, existsSync } from "node:fs";
-import { createPublicClient, http } from "viem";
-import { base } from "viem/chains";
-import { privateKeyToAccount } from "viem/accounts";
-import { x402Client } from "@x402/fetch";
-import { createPayFetchWithPreAuth } from "./payment-preauth.js";
-import { registerExactEvmScheme } from "@x402/evm/exact/client";
-import { toClientEvmSigner } from "@x402/evm";
 import {
   route,
   getFallbackChain,
@@ -54,6 +37,9 @@ import {
   type ModelPricing,
   type Tier,
 } from "./router/index.js";
+import { route as igniteRoute, type RoutingContext } from "./routing-engine.js";
+import { callWithFallback, type FallbackResult } from "./fallback-caller.js";
+import { loadProviders, type IgniteConfig } from "./user-providers.js";
 import { classifyByRules } from "./router/rules.js";
 import {
   BLOCKRUN_MODELS,
@@ -69,16 +55,7 @@ import { logUsage, type UsageEntry } from "./logger.js";
 import { getStats, clearStats } from "./stats.js";
 import { RequestDeduplicator } from "./dedup.js";
 import { ResponseCache, type ResponseCacheConfig } from "./response-cache.js";
-import { BalanceMonitor } from "./balance.js";
-import type { SolanaBalanceMonitor } from "./solana-balance.js";
-
-/** Union type for chain-agnostic balance monitoring */
-type AnyBalanceMonitor = BalanceMonitor | SolanaBalanceMonitor;
-import { resolvePaymentChain } from "./auth.js";
 import { compressContext, shouldCompress, type NormalizedMessage } from "./compression/index.js";
-// Error classes available for programmatic use but not used in proxy
-// (universal free fallback means we don't throw balance errors anymore)
-// import { InsufficientFundsError, EmptyWalletError } from "./errors.js";
 import { USER_AGENT, VERSION } from "./version.js";
 import {
   SessionStore,
@@ -1113,110 +1090,44 @@ function stripThinkingTokens(content: string): string {
   return cleaned;
 }
 
-/** Callback info for low balance warning */
-export type LowBalanceInfo = {
-  balanceUSD: string;
-  walletAddress: string;
-};
-
-/** Callback info for insufficient funds error */
-export type InsufficientFundsInfo = {
-  balanceUSD: string;
-  requiredUSD: string;
-  walletAddress: string;
-};
-
-/**
- * Wallet config: either a plain EVM private key string, or the full
- * resolution object from resolveOrGenerateWalletKey() which may include
- * Solana keys. Using the full object prevents callers from accidentally
- * forgetting to forward Solana key bytes.
- */
-export type WalletConfig = string | { key: string; solanaPrivateKeyBytes?: Uint8Array };
-
-export type PaymentChain = "base" | "solana";
-
 export type ProxyOptions = {
-  wallet: WalletConfig;
   apiBase?: string;
-  /** Payment chain: "base" (default) or "solana". Can also be set via CLAWROUTER_PAYMENT_CHAIN env var. */
-  paymentChain?: PaymentChain;
-  /** Port to listen on (default: 8402) */
   port?: number;
   routingConfig?: Partial<RoutingConfig>;
-  /** Request timeout in ms (default: 180000 = 3 minutes). Covers on-chain tx + LLM response. */
   requestTimeoutMs?: number;
-  /** Skip balance checks (for testing only). Default: false */
-  skipBalanceCheck?: boolean;
-  /** Override the balance monitor with a mock (for testing only). */
-  _balanceMonitorOverride?: AnyBalanceMonitor;
-  /**
-   * Session persistence config. When enabled, maintains model selection
-   * across requests within a session to prevent mid-task model switching.
-   */
   sessionConfig?: Partial<SessionConfig>;
-  /**
-   * Auto-compress large requests to reduce network usage.
-   * When enabled, requests are automatically compressed using
-   * LLM-safe context compression (15-40% reduction).
-   * Default: true
-   */
   autoCompressRequests?: boolean;
-  /**
-   * Threshold in KB to trigger auto-compression (default: 180).
-   * Requests larger than this are compressed before sending.
-   * Set to 0 to compress all requests.
-   */
   compressionThresholdKB?: number;
-  /**
-   * Response caching config. When enabled, identical requests return
-   * cached responses instead of making new API calls.
-   * Default: enabled with 10 minute TTL, 200 max entries.
-   */
   cacheConfig?: ResponseCacheConfig;
-  /**
-   * Maximum total spend (in USD) per session run.
-   * Default: undefined (no limit). Example: 0.5 = $0.50 per session.
-   */
   maxCostPerRunUsd?: number;
-  /**
-   * How to enforce the per-run cost cap.
-   * - 'graceful' (default): when budget runs low, downgrade to cheaper models; use free model
-   *   as last resort. Only hard-stops when no model can serve the request.
-   * - 'strict': immediately return 429 once the session spend reaches the cap.
-   */
   maxCostPerRunMode?: "graceful" | "strict";
-  /**
-   * Set of model IDs to exclude from routing.
-   * Excluded models are filtered out of fallback chains.
-   * Loaded from ~/.openclaw/blockrun/exclude-models.json
-   */
   excludeModels?: Set<string>;
   onReady?: (port: number) => void;
   onError?: (error: Error) => void;
-  onPayment?: (info: { model: string; amount: string; network: string }) => void;
   onRouted?: (decision: RoutingDecision) => void;
-  /** Called when balance drops below $1.00 (warning, request still proceeds) */
-  onLowBalance?: (info: LowBalanceInfo) => void;
-  /** Called when balance is insufficient for a request (request fails) */
-  onInsufficientFunds?: (info: InsufficientFundsInfo) => void;
-  /**
-   * Upstream proxy URL for all outgoing requests.
-   * Supports http://, https://, and socks5:// schemes.
-   * Also readable via BLOCKRUN_UPSTREAM_PROXY environment variable.
-   * Example: "socks5://127.0.0.1:1080"
-   */
   upstreamProxy?: string;
+  igniteConfig?: IgniteConfig;
 };
 
 export type ProxyHandle = {
   port: number;
   baseUrl: string;
-  walletAddress: string;
-  solanaAddress?: string;
-  balanceMonitor: AnyBalanceMonitor;
   close: () => Promise<void>;
 };
+
+function estimateTokenCount(messages: unknown[]): number {
+  if (!Array.isArray(messages)) return 0;
+  const text = messages
+    .map((m) => {
+      const content = (m as { content?: unknown }).content;
+      if (typeof content === "string") return content;
+      if (Array.isArray(content))
+        return content.map((c: unknown) => (c as { text?: string }).text ?? "").join(" ");
+      return "";
+    })
+    .join(" ");
+  return Math.ceil(text.length / 4);
+}
 
 /**
  * Build model pricing map from BLOCKRUN_MODELS.
@@ -1341,18 +1252,16 @@ function estimateImageCost(model: string, size?: string, n: number = 1): number 
 }
 
 /**
- * Proxy a partner API request through x402 payment flow.
+ * Proxy a partner API request.
  *
  * Simplified proxy for partner endpoints (/v1/x/*, /v1/partner/*).
  * No smart routing, SSE, compression, or sessions — just collect body,
- * forward via payFetch (which handles 402 automatically), and stream back.
+ * forward via fetch, and stream back.
  */
 async function proxyPartnerRequest(
   req: IncomingMessage,
   res: ServerResponse,
   apiBase: string,
-  payFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
-  getActualPaymentUsd: () => number,
 ): Promise<void> {
   const startTime = Date.now();
   const upstreamUrl = `${apiBase}${req.url}`;
@@ -1379,9 +1288,9 @@ async function proxyPartnerRequest(
   if (!headers["content-type"]) headers["content-type"] = "application/json";
   headers["user-agent"] = USER_AGENT;
 
-  console.log(`[ClawRouter] Partner request: ${req.method} ${req.url}`);
+  console.log(`[IgniteRouter] Partner request: ${req.method} ${req.url}`);
 
-  const upstream = await payFetch(upstreamUrl, {
+  const upstream = await fetch(upstreamUrl, {
     method: req.method ?? "POST",
     headers,
     body: body.length > 0 ? new Uint8Array(body) : undefined,
@@ -1389,7 +1298,7 @@ async function proxyPartnerRequest(
 
   // Forward response headers
   const responseHeaders: Record<string, string> = {};
-  upstream.headers.forEach((value, key) => {
+  upstream.headers.forEach((value: string, key: string) => {
     if (key === "transfer-encoding" || key === "connection" || key === "content-encoding") return;
     responseHeaders[key] = value;
   });
@@ -1407,16 +1316,14 @@ async function proxyPartnerRequest(
   res.end();
 
   const latencyMs = Date.now() - startTime;
-  console.log(`[ClawRouter] Partner response: ${upstream.status} (${latencyMs}ms)`);
+  console.log(`[IgniteRouter] Partner response: ${upstream.status} (${latencyMs}ms)`);
 
-  // Log partner usage with actual x402 payment amount (previously logged cost: 0)
-  const partnerCost = getActualPaymentUsd();
   logUsage({
     timestamp: new Date().toISOString(),
     model: "partner",
     tier: "PARTNER",
-    cost: partnerCost,
-    baselineCost: partnerCost,
+    cost: 0,
+    baselineCost: 0,
     savings: 0,
     latencyMs,
     partnerId:
@@ -1487,164 +1394,33 @@ async function uploadDataUriToHost(dataUri: string): Promise<string> {
 }
 
 /**
- * Start the local x402 proxy server.
+ * Start the local proxy server.
  *
  * If a proxy is already running on the target port, reuses it instead of failing.
- * Port can be configured via BLOCKRUN_PROXY_PORT environment variable.
+ * Port can be configured via IGNITEROUTER_PROXY_PORT environment variable.
  *
  * Returns a handle with the assigned port, base URL, and a close function.
  */
 export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
-  // Apply upstream proxy (SOCKS5/HTTP) before any outgoing requests
   const upstreamProxy = await applyUpstreamProxy(options.upstreamProxy);
   if (upstreamProxy) {
-    console.log(`[ClawRouter] Upstream proxy: ${upstreamProxy}`);
+    console.log(`[IgniteRouter] Upstream proxy: ${upstreamProxy}`);
   }
 
-  // Normalize wallet config: string = EVM-only, object = full resolution
-  const walletKey = typeof options.wallet === "string" ? options.wallet : options.wallet.key;
-  const solanaPrivateKeyBytes =
-    typeof options.wallet === "string" ? undefined : options.wallet.solanaPrivateKeyBytes;
-
-  // Payment chain: options > env var > persisted file > default "base".
-  // No dynamic switching — user selects chain via /wallet solana or /wallet base.
-  const paymentChain = options.paymentChain ?? (await resolvePaymentChain());
-  const apiBase =
-    options.apiBase ??
-    (paymentChain === "solana" && solanaPrivateKeyBytes ? BLOCKRUN_SOLANA_API : BLOCKRUN_API);
-  if (paymentChain === "solana" && !solanaPrivateKeyBytes) {
-    console.warn(
-      `[ClawRouter] ⚠ Payment chain is Solana but no mnemonic found — falling back to Base (EVM).`,
-    );
-    console.warn(
-      `[ClawRouter]   To fix: run "npx @blockrun/clawrouter wallet recover" if your mnemonic exists,`,
-    );
-    console.warn(`[ClawRouter]   or run "npx @blockrun/clawrouter chain base" to switch to EVM.`);
-  } else if (paymentChain === "solana") {
-    console.log(`[ClawRouter] Payment chain: Solana (${BLOCKRUN_SOLANA_API})`);
-  }
-
-  // Determine port: options.port > env var > default
+  const apiBase = options.apiBase ?? BLOCKRUN_API;
   const listenPort = options.port ?? getProxyPort();
 
-  // Check if a proxy is already running on this port
   const existingProxy = await checkExistingProxy(listenPort);
   if (existingProxy) {
-    // Proxy already running — reuse it instead of failing with EADDRINUSE
-    const account = privateKeyToAccount(walletKey as `0x${string}`);
     const baseUrl = `http://127.0.0.1:${listenPort}`;
-
-    // Verify the existing proxy is using the same wallet (or warn if different)
-    if (existingProxy.wallet !== account.address) {
-      console.warn(
-        `[ClawRouter] Existing proxy on port ${listenPort} uses wallet ${existingProxy.wallet}, but current config uses ${account.address}. Reusing existing proxy.`,
-      );
-    }
-
-    // Verify the existing proxy is using the same payment chain
-    if (existingProxy.paymentChain) {
-      if (existingProxy.paymentChain !== paymentChain) {
-        throw new Error(
-          `Existing proxy on port ${listenPort} is using ${existingProxy.paymentChain} but ${paymentChain} was requested. ` +
-            `Stop the existing proxy first or use a different port.`,
-        );
-      }
-    } else if (paymentChain !== "base") {
-      // Old proxy doesn't report chain — assume Base. Reject if Solana was requested.
-      console.warn(
-        `[ClawRouter] Existing proxy on port ${listenPort} does not report paymentChain (pre-v0.11 instance). Assuming Base.`,
-      );
-      throw new Error(
-        `Existing proxy on port ${listenPort} is a pre-v0.11 instance (assumed Base) but ${paymentChain} was requested. ` +
-          `Stop the existing proxy first or use a different port.`,
-      );
-    }
-
-    // Derive Solana address if keys are available (for wallet status display)
-    let reuseSolanaAddress: string | undefined;
-    if (solanaPrivateKeyBytes) {
-      const { createKeyPairSignerFromPrivateKeyBytes } = await import("@solana/kit");
-      const solanaSigner = await createKeyPairSignerFromPrivateKeyBytes(solanaPrivateKeyBytes);
-      reuseSolanaAddress = solanaSigner.address;
-    }
-
-    // Use chain-appropriate balance monitor (lazy import to avoid loading @solana/kit on Base chain)
-    let balanceMonitor: AnyBalanceMonitor;
-    if (paymentChain === "solana" && reuseSolanaAddress) {
-      const { SolanaBalanceMonitor } = await import("./solana-balance.js");
-      balanceMonitor = new SolanaBalanceMonitor(reuseSolanaAddress);
-    } else {
-      balanceMonitor = new BalanceMonitor(account.address);
-    }
-
     options.onReady?.(listenPort);
-
     return {
       port: listenPort,
       baseUrl,
-      walletAddress: existingProxy.wallet,
-      solanaAddress: reuseSolanaAddress,
-      balanceMonitor,
-      close: async () => {
-        // No-op: we didn't start this proxy, so we shouldn't close it
-      },
+      close: async () => {},
     };
   }
 
-  // Create x402 payment client with EVM scheme (always available)
-  const account = privateKeyToAccount(walletKey as `0x${string}`);
-  const evmPublicClient = createPublicClient({ chain: base, transport: http() });
-  const evmSigner = toClientEvmSigner(account, evmPublicClient);
-  const x402 = new x402Client();
-  registerExactEvmScheme(x402, { signer: evmSigner });
-
-  // Register Solana scheme if key is available
-  // Uses registerExactSvmScheme helper which registers:
-  //   - solana:* wildcard (catches any CAIP-2 Solana network)
-  //   - V1 compat names: "solana", "solana-devnet", "solana-testnet"
-  let solanaAddress: string | undefined;
-  if (solanaPrivateKeyBytes) {
-    const { registerExactSvmScheme } = await import("@x402/svm/exact/client");
-    const { createKeyPairSignerFromPrivateKeyBytes } = await import("@solana/kit");
-    const solanaSigner = await createKeyPairSignerFromPrivateKeyBytes(solanaPrivateKeyBytes);
-    solanaAddress = solanaSigner.address;
-    registerExactSvmScheme(x402, { signer: solanaSigner });
-    console.log(`[ClawRouter] Solana wallet: ${solanaAddress}`);
-  }
-
-  // Log which chain is used for each payment and capture actual payment amount
-  x402.onAfterPaymentCreation(async (context) => {
-    const network = context.selectedRequirements.network;
-    const chain = network.startsWith("eip155")
-      ? "Base (EVM)"
-      : network.startsWith("solana")
-        ? "Solana"
-        : network;
-    // Capture actual payment amount in USD (amount is in USDC micro units, 6 decimals)
-    const amountMicros = parseInt(context.selectedRequirements.amount || "0", 10);
-    const amountUsd = amountMicros / 1_000_000;
-    // Write to request-scoped store (if available)
-    const store = paymentStore.getStore();
-    if (store) store.amountUsd = amountUsd;
-    console.log(`[ClawRouter] Payment signed on ${chain} (${network}) — $${amountUsd.toFixed(6)}`);
-  });
-
-  const payFetch = createPayFetchWithPreAuth(fetch, x402, undefined, {
-    skipPreAuth: paymentChain === "solana",
-  });
-
-  // Create balance monitor for pre-request checks (lazy import to avoid loading @solana/kit on Base chain)
-  let balanceMonitor: AnyBalanceMonitor;
-  if (options._balanceMonitorOverride) {
-    balanceMonitor = options._balanceMonitorOverride;
-  } else if (paymentChain === "solana" && solanaAddress) {
-    const { SolanaBalanceMonitor } = await import("./solana-balance.js");
-    balanceMonitor = new SolanaBalanceMonitor(solanaAddress);
-  } else {
-    balanceMonitor = new BalanceMonitor(account.address);
-  }
-
-  // Build router options (100% local — no external API calls for routing)
   const routingConfig = mergeRoutingConfig(options.routingConfig);
   const modelPricing = buildModelPricing();
   const routerOpts: RouterOptions = {
@@ -1652,530 +1428,444 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
     modelPricing,
   };
 
-  // Request deduplicator (shared across all requests)
   const deduplicator = new RequestDeduplicator();
-
-  // Response cache for identical requests (longer TTL than dedup)
   const responseCache = new ResponseCache(options.cacheConfig);
-
-  // Session store for model persistence (prevents mid-task model switching)
   const sessionStore = new SessionStore(options.sessionConfig);
-
-  // Session journal for memory (enables agents to recall earlier work)
   const sessionJournal = new SessionJournal();
-
-  // Track active connections for graceful cleanup
   const connections = new Set<import("net").Socket>();
 
-  const server = createServer((req: IncomingMessage, res: ServerResponse) => {
-    // Wrap in paymentStore.run() so x402 hook can write actual payment amount per-request
-    paymentStore.run({ amountUsd: 0 }, async () => {
-      // Add stream error handlers to prevent server crashes
-      req.on("error", (err) => {
-        console.error(`[ClawRouter] Request stream error: ${err.message}`);
-        // Don't throw - just log and let request handler deal with it
-      });
+  const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    req.on("error", (err) => {
+      console.error(`[IgniteRouter] Request stream error: ${err.message}`);
+    });
 
-      res.on("error", (err) => {
-        console.error(`[ClawRouter] Response stream error: ${err.message}`);
-        // Don't try to write to failed socket - just log
-      });
+    res.on("error", (err) => {
+      console.error(`[IgniteRouter] Response stream error: ${err.message}`);
+    });
 
-      // Finished wrapper for guaranteed cleanup on response completion/error
-      finished(res, (err) => {
-        if (err && err.code !== "ERR_STREAM_DESTROYED") {
-          console.error(`[ClawRouter] Response finished with error: ${err.message}`);
-        }
-        // Note: heartbeatInterval cleanup happens in res.on("close") handler
-        // Note: completed and dedup cleanup happens in the res.on("close") handler below
-      });
+    finished(res, (err) => {
+      if (err && err.code !== "ERR_STREAM_DESTROYED") {
+        console.error(`[IgniteRouter] Response finished with error: ${err.message}`);
+      }
+    });
 
-      // Request finished wrapper for complete stream lifecycle tracking
-      finished(req, (err) => {
-        if (err && err.code !== "ERR_STREAM_DESTROYED") {
-          console.error(`[ClawRouter] Request finished with error: ${err.message}`);
-        }
-      });
+    finished(req, (err) => {
+      if (err && err.code !== "ERR_STREAM_DESTROYED") {
+        console.error(`[IgniteRouter] Request finished with error: ${err.message}`);
+      }
+    });
 
-      // Health check with optional balance info
-      if (req.url === "/health" || req.url?.startsWith("/health?")) {
-        const url = new URL(req.url, "http://localhost");
-        const full = url.searchParams.get("full") === "true";
-
-        const response: Record<string, unknown> = {
-          status: "ok",
-          wallet: account.address,
-          paymentChain,
-        };
-        if (solanaAddress) {
-          response.solana = solanaAddress;
-        }
-        if (upstreamProxy) {
-          response.upstreamProxy = upstreamProxy;
-        }
-
-        if (full) {
-          try {
-            const balanceInfo = await balanceMonitor.checkBalance();
-            response.balance = balanceInfo.balanceUSD;
-            response.isLow = balanceInfo.isLow;
-            response.isEmpty = balanceInfo.isEmpty;
-          } catch {
-            response.balanceError = "Could not fetch balance";
-          }
-        }
-
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify(response));
-        return;
+    if (req.url === "/health" || req.url?.startsWith("/health?")) {
+      const response: Record<string, unknown> = {
+        status: "ok",
+      };
+      if (upstreamProxy) {
+        response.upstreamProxy = upstreamProxy;
       }
 
-      // Cache stats endpoint
-      if (req.url === "/cache" || req.url?.startsWith("/cache?")) {
-        const stats = responseCache.getStats();
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(response));
+      return;
+    }
+
+    if (req.url === "/cache" || req.url?.startsWith("/cache?")) {
+      const stats = responseCache.getStats();
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-cache",
+      });
+      res.end(JSON.stringify(stats, null, 2));
+      return;
+    }
+
+    if (req.url === "/stats" && req.method === "DELETE") {
+      try {
+        const result = await clearStats();
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ cleared: true, deletedFiles: result.deletedFiles }));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            error: `Failed to clear stats: ${err instanceof Error ? err.message : String(err)}`,
+          }),
+        );
+      }
+      return;
+    }
+
+    if (req.url === "/stats" || req.url?.startsWith("/stats?")) {
+      try {
+        const url = new URL(req.url, "http://localhost");
+        const days = parseInt(url.searchParams.get("days") || "7", 10);
+        const stats = await getStats(Math.min(days, 30));
+
         res.writeHead(200, {
           "Content-Type": "application/json",
           "Cache-Control": "no-cache",
         });
-        res.end(JSON.stringify(stats, null, 2));
+        res.end(
+          JSON.stringify(
+            {
+              ...stats,
+              providerErrors: Object.fromEntries(perProviderErrors),
+            },
+            null,
+            2,
+          ),
+        );
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            error: `Failed to get stats: ${err instanceof Error ? err.message : String(err)}`,
+          }),
+        );
+      }
+      return;
+    }
+
+    if (req.url === "/v1/models" && req.method === "GET") {
+      const models = buildProxyModelList();
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ object: "list", data: models }));
+      return;
+    }
+
+    if (req.url?.startsWith("/images/") && req.method === "GET") {
+      const filename = req.url
+        .slice("/images/".length)
+        .split("?")[0]!
+        .replace(/[^a-zA-Z0-9._-]/g, "");
+      if (!filename) {
+        res.writeHead(400);
+        res.end("Bad request");
         return;
       }
-
-      // Stats clear endpoint - delete all log files
-      if (req.url === "/stats" && req.method === "DELETE") {
-        try {
-          const result = await clearStats();
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ cleared: true, deletedFiles: result.deletedFiles }));
-        } catch (err) {
-          res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(
-            JSON.stringify({
-              error: `Failed to clear stats: ${err instanceof Error ? err.message : String(err)}`,
-            }),
-          );
-        }
-        return;
-      }
-
-      // Stats API endpoint - returns JSON for programmatic access
-      if (req.url === "/stats" || req.url?.startsWith("/stats?")) {
-        try {
-          const url = new URL(req.url, "http://localhost");
-          const days = parseInt(url.searchParams.get("days") || "7", 10);
-          const stats = await getStats(Math.min(days, 30));
-
-          res.writeHead(200, {
-            "Content-Type": "application/json",
-            "Cache-Control": "no-cache",
-          });
-          res.end(
-            JSON.stringify(
-              {
-                ...stats,
-                providerErrors: Object.fromEntries(perProviderErrors),
-              },
-              null,
-              2,
-            ),
-          );
-        } catch (err) {
-          res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(
-            JSON.stringify({
-              error: `Failed to get stats: ${err instanceof Error ? err.message : String(err)}`,
-            }),
-          );
-        }
-        return;
-      }
-
-      // --- Handle /v1/models locally (no upstream call needed) ---
-      if (req.url === "/v1/models" && req.method === "GET") {
-        const models = buildProxyModelList();
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ object: "list", data: models }));
-        return;
-      }
-
-      // --- Serve locally cached images (~/.openclaw/blockrun/images/) ---
-      if (req.url?.startsWith("/images/") && req.method === "GET") {
-        const filename = req.url
-          .slice("/images/".length)
-          .split("?")[0]!
-          .replace(/[^a-zA-Z0-9._-]/g, "");
-        if (!filename) {
-          res.writeHead(400);
-          res.end("Bad request");
-          return;
-        }
-        const filePath = join(IMAGE_DIR, filename);
-        try {
-          const s = await fsStat(filePath);
-          if (!s.isFile()) throw new Error("not a file");
-          const ext = filename.split(".").pop()?.toLowerCase() ?? "png";
-          const mime: Record<string, string> = {
-            png: "image/png",
-            jpg: "image/jpeg",
-            jpeg: "image/jpeg",
-            webp: "image/webp",
-            gif: "image/gif",
-          };
-          const data = await readFile(filePath);
-          res.writeHead(200, {
-            "Content-Type": mime[ext] ?? "application/octet-stream",
-            "Content-Length": data.length,
-          });
-          res.end(data);
-        } catch {
-          res.writeHead(404, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "Image not found" }));
-        }
-        return;
-      }
-
-      // --- Handle /v1/images/generations: proxy with x402 payment + save data URIs locally ---
-      // NOTE: image generation endpoints bypass maxCostPerRun budget tracking entirely.
-      // Cost is charged via x402 micropayment directly — no session accumulation or cap enforcement.
-      if (req.url === "/v1/images/generations" && req.method === "POST") {
-        const imgStartTime = Date.now();
-        const chunks: Buffer[] = [];
-        for await (const chunk of req) {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-        }
-        const reqBody = Buffer.concat(chunks);
-        // Parse request for usage logging
-        let imgModel = "unknown";
-        let imgCost = 0;
-        try {
-          const parsed = JSON.parse(reqBody.toString());
-          imgModel = parsed.model || "openai/dall-e-3";
-          const n = parsed.n || 1;
-          imgCost = estimateImageCost(imgModel, parsed.size, n);
-        } catch {
-          /* use defaults */
-        }
-        try {
-          const upstream = await payFetch(`${apiBase}/v1/images/generations`, {
-            method: "POST",
-            headers: { "content-type": "application/json", "user-agent": USER_AGENT },
-            body: reqBody,
-          });
-          const text = await upstream.text();
-          if (!upstream.ok) {
-            res.writeHead(upstream.status, { "Content-Type": "application/json" });
-            res.end(text);
-            return;
-          }
-          let result: { created?: number; data?: Array<{ url?: string; revised_prompt?: string }> };
-          try {
-            result = JSON.parse(text);
-          } catch {
-            res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(text);
-            return;
-          }
-          // Save images to ~/.openclaw/blockrun/images/ and replace with localhost URLs
-          // Handles both base64 data URIs (Google) and HTTP URLs (DALL-E 3)
-          if (result.data?.length) {
-            await mkdir(IMAGE_DIR, { recursive: true });
-            const port = (server.address() as AddressInfo | null)?.port ?? 8402;
-            for (const img of result.data) {
-              const dataUriMatch = img.url?.match(/^data:(image\/\w+);base64,(.+)$/);
-              if (dataUriMatch) {
-                const [, mimeType, b64] = dataUriMatch;
-                const ext = mimeType === "image/jpeg" ? "jpg" : (mimeType!.split("/")[1] ?? "png");
-                const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
-                await writeFile(join(IMAGE_DIR, filename), Buffer.from(b64!, "base64"));
-                img.url = `http://localhost:${port}/images/${filename}`;
-                console.log(`[ClawRouter] Image saved → ${img.url}`);
-              } else if (img.url?.startsWith("https://") || img.url?.startsWith("http://")) {
-                try {
-                  const imgResp = await fetch(img.url);
-                  if (imgResp.ok) {
-                    const contentType = imgResp.headers.get("content-type") ?? "image/png";
-                    const ext =
-                      contentType.includes("jpeg") || contentType.includes("jpg")
-                        ? "jpg"
-                        : contentType.includes("webp")
-                          ? "webp"
-                          : "png";
-                    const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
-                    const buf = Buffer.from(await imgResp.arrayBuffer());
-                    await writeFile(join(IMAGE_DIR, filename), buf);
-                    img.url = `http://localhost:${port}/images/${filename}`;
-                    console.log(`[ClawRouter] Image downloaded & saved → ${img.url}`);
-                  }
-                } catch (downloadErr) {
-                  console.warn(
-                    `[ClawRouter] Failed to download image, using original URL: ${downloadErr instanceof Error ? downloadErr.message : String(downloadErr)}`,
-                  );
-                }
-              }
-            }
-          }
-          // Log image generation usage with actual x402 payment (previously missing entirely)
-          const imgActualCost = paymentStore.getStore()?.amountUsd ?? imgCost;
-          logUsage({
-            timestamp: new Date().toISOString(),
-            model: imgModel,
-            tier: "IMAGE",
-            cost: imgActualCost,
-            baselineCost: imgActualCost,
-            savings: 0,
-            latencyMs: Date.now() - imgStartTime,
-          }).catch(() => {});
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify(result));
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.error(`[ClawRouter] Image generation error: ${msg}`);
-          if (!res.headersSent) {
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: "Image generation failed", details: msg }));
-          }
-        }
-        return;
-      }
-
-      // --- Handle /v1/images/image2image: proxy with x402 payment + save images locally ---
-      // Accepts image as: data URI, local file path, ~/path, or HTTP(S) URL
-      if (req.url === "/v1/images/image2image" && req.method === "POST") {
-        const img2imgStartTime = Date.now();
-        const chunks: Buffer[] = [];
-        for await (const chunk of req) {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-        }
-        const rawBody = Buffer.concat(chunks);
-
-        // Resolve image/mask fields: file paths and URLs → data URIs
-        let reqBody: string;
-        // eslint-disable-next-line no-useless-assignment -- reassigned in try, used after catch
-        let img2imgModel = "openai/gpt-image-1";
-        // eslint-disable-next-line no-useless-assignment -- reassigned in try, used after catch
-        let img2imgCost = 0;
-        try {
-          const parsed = JSON.parse(rawBody.toString());
-          for (const field of ["image", "mask"] as const) {
-            const val = parsed[field];
-            if (typeof val !== "string" || !val) continue;
-            if (val.startsWith("data:")) {
-              // Already a data URI — pass through
-            } else if (val.startsWith("https://") || val.startsWith("http://")) {
-              // Download URL → data URI
-              const imgResp = await fetch(val);
-              if (!imgResp.ok)
-                throw new Error(`Failed to download ${field} from ${val}: HTTP ${imgResp.status}`);
-              const contentType = imgResp.headers.get("content-type") ?? "image/png";
-              const buf = Buffer.from(await imgResp.arrayBuffer());
-              parsed[field] = `data:${contentType};base64,${buf.toString("base64")}`;
-              console.log(
-                `[ClawRouter] img2img: downloaded ${field} URL → data URI (${buf.length} bytes)`,
-              );
-            } else {
-              // Local file path → data URI
-              parsed[field] = readImageFileAsDataUri(val);
-              console.log(`[ClawRouter] img2img: read ${field} file → data URI`);
-            }
-          }
-          // Default model if not specified
-          if (!parsed.model) parsed.model = "openai/gpt-image-1";
-          img2imgModel = parsed.model;
-          img2imgCost = estimateImageCost(img2imgModel, parsed.size, parsed.n || 1);
-          reqBody = JSON.stringify(parsed);
-        } catch (parseErr) {
-          const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "Invalid request", details: msg }));
-          return;
-        }
-
-        try {
-          const upstream = await payFetch(`${apiBase}/v1/images/image2image`, {
-            method: "POST",
-            headers: { "content-type": "application/json", "user-agent": USER_AGENT },
-            body: reqBody,
-          });
-          const text = await upstream.text();
-          if (!upstream.ok) {
-            res.writeHead(upstream.status, { "Content-Type": "application/json" });
-            res.end(text);
-            return;
-          }
-          let result: { created?: number; data?: Array<{ url?: string; revised_prompt?: string }> };
-          try {
-            result = JSON.parse(text);
-          } catch {
-            res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(text);
-            return;
-          }
-          // Save images to ~/.openclaw/blockrun/images/ and replace with localhost URLs
-          // Handles both base64 data URIs (Google) and HTTP URLs (DALL-E 3)
-          if (result.data?.length) {
-            await mkdir(IMAGE_DIR, { recursive: true });
-            const port = (server.address() as AddressInfo | null)?.port ?? 8402;
-            for (const img of result.data) {
-              const dataUriMatch = img.url?.match(/^data:(image\/\w+);base64,(.+)$/);
-              if (dataUriMatch) {
-                const [, mimeType, b64] = dataUriMatch;
-                const ext = mimeType === "image/jpeg" ? "jpg" : (mimeType!.split("/")[1] ?? "png");
-                const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
-                await writeFile(join(IMAGE_DIR, filename), Buffer.from(b64!, "base64"));
-                img.url = `http://localhost:${port}/images/${filename}`;
-                console.log(`[ClawRouter] Image saved → ${img.url}`);
-              } else if (img.url?.startsWith("https://") || img.url?.startsWith("http://")) {
-                try {
-                  const imgResp = await fetch(img.url);
-                  if (imgResp.ok) {
-                    const contentType = imgResp.headers.get("content-type") ?? "image/png";
-                    const ext =
-                      contentType.includes("jpeg") || contentType.includes("jpg")
-                        ? "jpg"
-                        : contentType.includes("webp")
-                          ? "webp"
-                          : "png";
-                    const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
-                    const buf = Buffer.from(await imgResp.arrayBuffer());
-                    await writeFile(join(IMAGE_DIR, filename), buf);
-                    img.url = `http://localhost:${port}/images/${filename}`;
-                    console.log(`[ClawRouter] Image downloaded & saved → ${img.url}`);
-                  }
-                } catch (downloadErr) {
-                  console.warn(
-                    `[ClawRouter] Failed to download image, using original URL: ${downloadErr instanceof Error ? downloadErr.message : String(downloadErr)}`,
-                  );
-                }
-              }
-            }
-          }
-          // Log image editing usage with actual x402 payment (previously missing entirely)
-          const img2imgActualCost = paymentStore.getStore()?.amountUsd ?? img2imgCost;
-          logUsage({
-            timestamp: new Date().toISOString(),
-            model: img2imgModel,
-            tier: "IMAGE",
-            cost: img2imgActualCost,
-            baselineCost: img2imgActualCost,
-            savings: 0,
-            latencyMs: Date.now() - img2imgStartTime,
-          }).catch(() => {});
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify(result));
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.error(`[ClawRouter] Image editing error: ${msg}`);
-          if (!res.headersSent) {
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: "Image editing failed", details: msg }));
-          }
-        }
-        return;
-      }
-
-      // --- Handle partner API paths (/v1/x/*, /v1/partner/*, /v1/pm/*) ---
-      if (req.url?.match(/^\/v1\/(?:x|partner|pm)\//)) {
-        try {
-          await proxyPartnerRequest(
-            req,
-            res,
-            apiBase,
-            payFetch,
-            () => paymentStore.getStore()?.amountUsd ?? 0,
-          );
-        } catch (err) {
-          const error = err instanceof Error ? err : new Error(String(err));
-          options.onError?.(error);
-          if (!res.headersSent) {
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(
-              JSON.stringify({
-                error: { message: `Partner proxy error: ${error.message}`, type: "partner_error" },
-              }),
-            );
-          }
-        }
-        return;
-      }
-
-      // Only proxy paths starting with /v1
-      if (!req.url?.startsWith("/v1")) {
+      const filePath = join(IMAGE_DIR, filename);
+      try {
+        const s = await fsStat(filePath);
+        if (!s.isFile()) throw new Error("not a file");
+        const ext = filename.split(".").pop()?.toLowerCase() ?? "png";
+        const mime: Record<string, string> = {
+          png: "image/png",
+          jpg: "image/jpeg",
+          jpeg: "image/jpeg",
+          webp: "image/webp",
+          gif: "image/gif",
+        };
+        const data = await readFile(filePath);
+        res.writeHead(200, {
+          "Content-Type": mime[ext] ?? "application/octet-stream",
+          "Content-Length": data.length,
+        });
+        res.end(data);
+      } catch {
         res.writeHead(404, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Not found" }));
+        res.end(JSON.stringify({ error: "Image not found" }));
+      }
+      return;
+    }
+
+    if (req.url === "/v1/images/generations" && req.method === "POST") {
+      const imgStartTime = Date.now();
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      const reqBody = Buffer.concat(chunks);
+      let imgModel = "unknown";
+      let imgCost = 0;
+      try {
+        const parsed = JSON.parse(reqBody.toString());
+        imgModel = parsed.model || "openai/dall-e-3";
+        const n = parsed.n || 1;
+        imgCost = estimateImageCost(imgModel, parsed.size, n);
+      } catch {
+        /* use defaults */
+      }
+      try {
+        const upstream = await fetch(`${apiBase}/v1/images/generations`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "user-agent": USER_AGENT },
+          body: reqBody,
+        });
+        const text = await upstream.text();
+        if (!upstream.ok) {
+          res.writeHead(upstream.status, { "Content-Type": "application/json" });
+          res.end(text);
+          return;
+        }
+        let result: { created?: number; data?: Array<{ url?: string; revised_prompt?: string }> };
+        try {
+          result = JSON.parse(text);
+        } catch {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(text);
+          return;
+        }
+        if (result.data?.length) {
+          await mkdir(IMAGE_DIR, { recursive: true });
+          const port = (server.address() as AddressInfo | null)?.port ?? 8402;
+          for (const img of result.data) {
+            const dataUriMatch = img.url?.match(/^data:(image\/\w+);base64,(.+)$/);
+            if (dataUriMatch) {
+              const [, mimeType, b64] = dataUriMatch;
+              const ext = mimeType === "image/jpeg" ? "jpg" : (mimeType!.split("/")[1] ?? "png");
+              const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
+              await writeFile(join(IMAGE_DIR, filename), Buffer.from(b64!, "base64"));
+              img.url = `http://localhost:${port}/images/${filename}`;
+              console.log(`[IgniteRouter] Image saved → ${img.url}`);
+            } else if (img.url?.startsWith("https://") || img.url?.startsWith("http://")) {
+              try {
+                const imgResp = await fetch(img.url);
+                if (imgResp.ok) {
+                  const contentType = imgResp.headers.get("content-type") ?? "image/png";
+                  const ext =
+                    contentType.includes("jpeg") || contentType.includes("jpg")
+                      ? "jpg"
+                      : contentType.includes("webp")
+                        ? "webp"
+                        : "png";
+                  const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
+                  const buf = Buffer.from(await imgResp.arrayBuffer());
+                  await writeFile(join(IMAGE_DIR, filename), buf);
+                  img.url = `http://localhost:${port}/images/${filename}`;
+                  console.log(`[IgniteRouter] Image downloaded & saved → ${img.url}`);
+                }
+              } catch (downloadErr) {
+                console.warn(
+                  `[IgniteRouter] Failed to download image, using original URL: ${downloadErr instanceof Error ? downloadErr.message : String(downloadErr)}`,
+                );
+              }
+            }
+          }
+        }
+        logUsage({
+          timestamp: new Date().toISOString(),
+          model: imgModel,
+          tier: "IMAGE",
+          cost: imgCost,
+          baselineCost: imgCost,
+          savings: 0,
+          latencyMs: Date.now() - imgStartTime,
+        }).catch(() => {});
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[IgniteRouter] Image generation error: ${msg}`);
+        if (!res.headersSent) {
+          res.writeHead(502, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Image generation failed", details: msg }));
+        }
+      }
+      return;
+    }
+
+    if (req.url === "/v1/images/image2image" && req.method === "POST") {
+      const img2imgStartTime = Date.now();
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      const rawBody = Buffer.concat(chunks);
+
+      let reqBody: string;
+      let img2imgModel = "openai/gpt-image-1";
+      let img2imgCost = 0;
+      try {
+        const parsed = JSON.parse(rawBody.toString());
+        for (const field of ["image", "mask"] as const) {
+          const val = parsed[field];
+          if (typeof val !== "string" || !val) continue;
+          if (val.startsWith("data:")) {
+            // Already a data URI
+          } else if (val.startsWith("https://") || val.startsWith("http://")) {
+            const imgResp = await fetch(val);
+            if (!imgResp.ok)
+              throw new Error(`Failed to download ${field} from ${val}: HTTP ${imgResp.status}`);
+            const contentType = imgResp.headers.get("content-type") ?? "image/png";
+            const buf = Buffer.from(await imgResp.arrayBuffer());
+            parsed[field] = `data:${contentType};base64,${buf.toString("base64")}`;
+            console.log(
+              `[IgniteRouter] img2img: downloaded ${field} URL → data URI (${buf.length} bytes)`,
+            );
+          } else {
+            parsed[field] = readImageFileAsDataUri(val);
+            console.log(`[IgniteRouter] img2img: read ${field} file → data URI`);
+          }
+        }
+        if (!parsed.model) parsed.model = "openai/gpt-image-1";
+        img2imgModel = parsed.model;
+        img2imgCost = estimateImageCost(img2imgModel, parsed.size, parsed.n || 1);
+        reqBody = JSON.stringify(parsed);
+      } catch (parseErr) {
+        const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Invalid request", details: msg }));
         return;
       }
 
       try {
-        await proxyRequest(
-          req,
-          res,
-          apiBase,
-          payFetch,
-          options,
-          routerOpts,
-          deduplicator,
-          balanceMonitor,
-          sessionStore,
-          responseCache,
-          sessionJournal,
-        );
+        const upstream = await fetch(`${apiBase}/v1/images/image2image`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "user-agent": USER_AGENT },
+          body: reqBody,
+        });
+        const text = await upstream.text();
+        if (!upstream.ok) {
+          res.writeHead(upstream.status, { "Content-Type": "application/json" });
+          res.end(text);
+          return;
+        }
+        let result: { created?: number; data?: Array<{ url?: string; revised_prompt?: string }> };
+        try {
+          result = JSON.parse(text);
+        } catch {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(text);
+          return;
+        }
+        if (result.data?.length) {
+          await mkdir(IMAGE_DIR, { recursive: true });
+          const port = (server.address() as AddressInfo | null)?.port ?? 8402;
+          for (const img of result.data) {
+            const dataUriMatch = img.url?.match(/^data:(image\/\w+);base64,(.+)$/);
+            if (dataUriMatch) {
+              const [, mimeType, b64] = dataUriMatch;
+              const ext = mimeType === "image/jpeg" ? "jpg" : (mimeType!.split("/")[1] ?? "png");
+              const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
+              await writeFile(join(IMAGE_DIR, filename), Buffer.from(b64!, "base64"));
+              img.url = `http://localhost:${port}/images/${filename}`;
+              console.log(`[IgniteRouter] Image saved → ${img.url}`);
+            } else if (img.url?.startsWith("https://") || img.url?.startsWith("http://")) {
+              try {
+                const imgResp = await fetch(img.url);
+                if (imgResp.ok) {
+                  const contentType = imgResp.headers.get("content-type") ?? "image/png";
+                  const ext =
+                    contentType.includes("jpeg") || contentType.includes("jpg")
+                      ? "jpg"
+                      : contentType.includes("webp")
+                        ? "webp"
+                        : "png";
+                  const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
+                  const buf = Buffer.from(await imgResp.arrayBuffer());
+                  await writeFile(join(IMAGE_DIR, filename), buf);
+                  img.url = `http://localhost:${port}/images/${filename}`;
+                  console.log(`[IgniteRouter] Image downloaded & saved → ${img.url}`);
+                }
+              } catch (downloadErr) {
+                console.warn(
+                  `[IgniteRouter] Failed to download image, using original URL: ${downloadErr instanceof Error ? downloadErr.message : String(downloadErr)}`,
+                );
+              }
+            }
+          }
+        }
+        logUsage({
+          timestamp: new Date().toISOString(),
+          model: img2imgModel,
+          tier: "IMAGE",
+          cost: img2imgCost,
+          baselineCost: img2imgCost,
+          savings: 0,
+          latencyMs: Date.now() - img2imgStartTime,
+        }).catch(() => {});
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[IgniteRouter] Image editing error: ${msg}`);
+        if (!res.headersSent) {
+          res.writeHead(502, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Image editing failed", details: msg }));
+        }
+      }
+      return;
+    }
+
+    if (req.url?.match(/^\/v1\/(?:x|partner|pm)\//)) {
+      try {
+        await proxyPartnerRequest(req, res, apiBase);
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         options.onError?.(error);
-
         if (!res.headersSent) {
           res.writeHead(502, { "Content-Type": "application/json" });
           res.end(
             JSON.stringify({
-              error: { message: `Proxy error: ${error.message}`, type: "proxy_error" },
+              error: { message: `Partner proxy error: ${error.message}`, type: "partner_error" },
             }),
           );
-        } else if (!res.writableEnded) {
-          // Headers already sent (streaming) — send error as SSE event
-          res.write(
-            `data: ${JSON.stringify({ error: { message: error.message, type: "proxy_error" } })}\n\n`,
-          );
-          res.write("data: [DONE]\n\n");
-          res.end();
         }
       }
-    }); // end paymentStore.run()
+      return;
+    }
+
+    if (!req.url?.startsWith("/v1")) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Not found" }));
+      return;
+    }
+
+    try {
+      await proxyRequest(
+        req,
+        res,
+        apiBase,
+        options,
+        routerOpts,
+        deduplicator,
+        sessionStore,
+        responseCache,
+        sessionJournal,
+      );
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      options.onError?.(error);
+
+      if (!res.headersSent) {
+        res.writeHead(502, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            error: { message: `Proxy error: ${error.message}`, type: "proxy_error" },
+          }),
+        );
+      } else if (!res.writableEnded) {
+        res.write(
+          `data: ${JSON.stringify({ error: { message: error.message, type: "proxy_error" } })}\n\n`,
+        );
+        res.write("data: [DONE]\n\n");
+        res.end();
+      }
+    }
   });
 
-  // Listen on configured port with retry logic for TIME_WAIT handling
-  // When gateway restarts quickly, the port may still be in TIME_WAIT state.
-  // We retry with delay instead of incorrectly assuming a proxy is running.
   const tryListen = (attempt: number): Promise<void> => {
     return new Promise<void>((resolveAttempt, rejectAttempt) => {
       const onError = async (err: NodeJS.ErrnoException) => {
         server.removeListener("error", onError);
 
         if (err.code === "EADDRINUSE") {
-          // Port is in use - check if a proxy is actually running
           const existingProxy2 = await checkExistingProxy(listenPort);
           if (existingProxy2) {
-            // Proxy is actually running - this is fine, reuse it
-            console.log(`[ClawRouter] Existing proxy detected on port ${listenPort}, reusing`);
-            rejectAttempt({
-              code: "REUSE_EXISTING",
-              wallet: existingProxy2.wallet,
-              existingChain: existingProxy2.paymentChain,
-            });
+            console.log(`[IgniteRouter] Existing proxy detected on port ${listenPort}, reusing`);
+            rejectAttempt({ code: "REUSE_EXISTING" });
             return;
           }
 
-          // Port is in TIME_WAIT (no proxy responding) - retry after delay
           if (attempt < PORT_RETRY_ATTEMPTS) {
             console.log(
-              `[ClawRouter] Port ${listenPort} in TIME_WAIT, retrying in ${PORT_RETRY_DELAY_MS}ms (attempt ${attempt}/${PORT_RETRY_ATTEMPTS})`,
+              `[IgniteRouter] Port ${listenPort} in TIME_WAIT, retrying in ${PORT_RETRY_DELAY_MS}ms (attempt ${attempt}/${PORT_RETRY_ATTEMPTS})`,
             );
             rejectAttempt({ code: "RETRY", attempt });
             return;
           }
 
-          // Max retries exceeded
           console.error(
-            `[ClawRouter] Port ${listenPort} still in use after ${PORT_RETRY_ATTEMPTS} attempts`,
+            `[IgniteRouter] Port ${listenPort} still in use after ${PORT_RETRY_ATTEMPTS} attempts`,
           );
           rejectAttempt(err);
           return;
@@ -2192,51 +1882,29 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
     });
   };
 
-  // Retry loop for port binding
   let lastError: Error | undefined;
   for (let attempt = 1; attempt <= PORT_RETRY_ATTEMPTS; attempt++) {
     try {
       await tryListen(attempt);
-      break; // Success
+      break;
     } catch (err: unknown) {
-      const error = err as {
-        code?: string;
-        wallet?: string;
-        existingChain?: string;
-        attempt?: number;
-      };
+      const error = err as { code?: string; attempt?: number };
 
-      if (error.code === "REUSE_EXISTING" && error.wallet) {
-        // Validate payment chain matches (same check as pre-listen reuse path)
-        if (error.existingChain && error.existingChain !== paymentChain) {
-          throw new Error(
-            `Existing proxy on port ${listenPort} is using ${error.existingChain} but ${paymentChain} was requested. ` +
-              `Stop the existing proxy first or use a different port.`,
-            { cause: err },
-          );
-        }
-
-        // Proxy is running, reuse it
+      if (error.code === "REUSE_EXISTING") {
         const baseUrl = `http://127.0.0.1:${listenPort}`;
         options.onReady?.(listenPort);
         return {
           port: listenPort,
           baseUrl,
-          walletAddress: error.wallet,
-          balanceMonitor,
-          close: async () => {
-            // No-op: we didn't start this proxy, so we shouldn't close it
-          },
+          close: async () => {},
         };
       }
 
       if (error.code === "RETRY") {
-        // Wait before retry
         await new Promise((r) => setTimeout(r, PORT_RETRY_DELAY_MS));
         continue;
       }
 
-      // Other error - throw
       lastError = err as Error;
       break;
     }
@@ -2246,51 +1914,38 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
     throw lastError;
   }
 
-  // Server is now listening - set up remaining handlers
   const addr = server.address() as AddressInfo;
   const port = addr.port;
   const baseUrl = `http://127.0.0.1:${port}`;
 
   options.onReady?.(port);
-
-  // Check for updates (non-blocking)
   checkForUpdates();
 
-  // Add runtime error handler AFTER successful listen
-  // This handles errors that occur during server operation (not just startup)
   server.on("error", (err) => {
-    console.error(`[ClawRouter] Server runtime error: ${err.message}`);
+    console.error(`[IgniteRouter] Server runtime error: ${err.message}`);
     options.onError?.(err);
-    // Don't crash - log and continue
   });
 
-  // Handle client connection errors (bad requests, socket errors)
   server.on("clientError", (err, socket) => {
-    console.error(`[ClawRouter] Client error: ${err.message}`);
-    // Send 400 Bad Request if socket is still writable
+    console.error(`[IgniteRouter] Client error: ${err.message}`);
     if (socket.writable && !socket.destroyed) {
       socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
     }
   });
 
-  // Track connections for graceful cleanup
   server.on("connection", (socket) => {
     connections.add(socket);
-
-    // Set 5-minute timeout for streaming requests
     socket.setTimeout(300_000);
 
     socket.on("timeout", () => {
-      console.error(`[ClawRouter] Socket timeout, destroying connection`);
+      console.error(`[IgniteRouter] Socket timeout, destroying connection`);
       socket.destroy();
     });
 
-    socket.on("end", () => {
-      // Half-closed by client (FIN received)
-    });
+    socket.on("end", () => {});
 
     socket.on("error", (err) => {
-      console.error(`[ClawRouter] Socket error: ${err.message}`);
+      console.error(`[IgniteRouter] Socket error: ${err.message}`);
     });
 
     socket.on("close", () => {
@@ -2301,17 +1956,13 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
   return {
     port,
     baseUrl,
-    walletAddress: account.address,
-    solanaAddress,
-    balanceMonitor,
     close: () =>
       new Promise<void>((res, rej) => {
         const timeout = setTimeout(() => {
-          rej(new Error("[ClawRouter] Close timeout after 4s"));
+          rej(new Error("[IgniteRouter] Close timeout after 4s"));
         }, 4000);
 
         sessionStore.close();
-        // Destroy all active connections before closing server
         for (const socket of connections) {
           socket.destroy();
         }
@@ -2349,8 +2000,6 @@ async function tryModelRequest(
   body: Buffer,
   modelId: string,
   maxTokens: number,
-  payFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
-  balanceMonitor: AnyBalanceMonitor,
   signal: AbortSignal,
 ): Promise<ModelRequestResult> {
   // Update model in body and normalize messages
@@ -2403,7 +2052,7 @@ async function tryModelRequest(
   }
 
   try {
-    const response = await payFetch(upstreamUrl, {
+    const response = await fetch(upstreamUrl, {
       method,
       headers,
       body: requestBody.length > 0 ? new Uint8Array(requestBody) : undefined,
@@ -2462,23 +2111,21 @@ async function tryModelRequest(
 }
 
 /**
- * Proxy a single request through x402 payment flow to BlockRun API.
+ * Proxy a single request to BlockRun API.
  *
  * Optimizations applied in order:
  *   1. Dedup check — if same request body seen within 30s, replay cached response
  *   2. Streaming heartbeat — for stream:true, send 200 + heartbeats immediately
- *   3. Smart routing — when model is "blockrun/auto", pick cheapest capable model
+ *   3. Smart routing — when model is "ignite/auto", pick cheapest capable model
  *   4. Fallback chain — on provider errors, try next model in tier's fallback list
  */
 async function proxyRequest(
   req: IncomingMessage,
   res: ServerResponse,
   apiBase: string,
-  payFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
   options: ProxyOptions,
   routerOpts: RouterOptions,
   deduplicator: RequestDeduplicator,
-  balanceMonitor: AnyBalanceMonitor,
   sessionStore: SessionStore,
   responseCache: ResponseCache,
   sessionJournal: SessionJournal,
@@ -2812,7 +2459,7 @@ async function proxyRequest(
             size: imageSize,
             n: 1,
           });
-          const imageResponse = await payFetch(imageUpstreamUrl, {
+          const imageResponse = await fetch(imageUpstreamUrl, {
             method: "POST",
             headers: { "content-type": "application/json", "user-agent": USER_AGENT },
             body: imageBody,
@@ -2862,10 +2509,8 @@ async function proxyRequest(
               lines.push("", `Model: ${imageModel} | Size: ${imageSize}`);
               responseText = lines.join("\n");
             }
-            console.log(`[ClawRouter] /imagegen success: ${images.length} image(s) generated`);
-            // Log /imagegen usage with actual x402 payment
-            const imagegenActualCost =
-              paymentStore.getStore()?.amountUsd ?? estimateImageCost(imageModel, imageSize, 1);
+            console.log(`[IgniteRouter] /imagegen success: ${images.length} image(s) generated`);
+            const imagegenActualCost = estimateImageCost(imageModel, imageSize, 1);
             logUsage({
               timestamp: new Date().toISOString(),
               model: imageModel,
@@ -3053,7 +2698,7 @@ async function proxyRequest(
             n: 1,
           });
 
-          const img2imgResponse = await payFetch(`${apiBase}/v1/images/image2image`, {
+          const img2imgResponse = await fetch(`${apiBase}/v1/images/image2image`, {
             method: "POST",
             headers: { "content-type": "application/json", "user-agent": USER_AGENT },
             body: img2imgBody,
@@ -3101,10 +2746,8 @@ async function proxyRequest(
               lines.push("", `Model: ${img2imgModel} | Size: ${img2imgSize}`);
               responseText = lines.join("\n");
             }
-            console.log(`[ClawRouter] /img2img success: ${images.length} image(s)`);
-            // Log /img2img usage with actual x402 payment
-            const img2imgActualCost2 =
-              paymentStore.getStore()?.amountUsd ?? estimateImageCost(img2imgModel, img2imgSize, 1);
+            console.log(`[IgniteRouter] /img2img success: ${images.length} image(s)`);
+            const img2imgActualCost2 = estimateImageCost(img2imgModel, img2imgSize, 1);
             logUsage({
               timestamp: new Date().toISOString(),
               model: img2imgModel,
@@ -3221,7 +2864,138 @@ async function proxyRequest(
             console.log(`[ClawRouter] Vision content detected, filtering to vision-capable models`);
           }
 
-          // Always route based on current request content
+          // --- IgniteRouter: use new routing engine when providers are configured ---
+          const igniteCfg = options.igniteConfig ?? { defaultPriority: "cost", providers: [] };
+          const useIgniteRouting = igniteCfg.providers && igniteCfg.providers.length > 0;
+
+          if (useIgniteRouting) {
+            console.log(
+              `[IgniteRouter] Using ignite routing engine with ${igniteCfg.providers.length} provider(s)`,
+            );
+
+            const routingContext: RoutingContext = {
+              messages: parsedMessages,
+              tools: parsed.tools as unknown[],
+              requestedModel: typeof parsed.model === "string" ? parsed.model : undefined,
+              estimatedTokens: estimateTokenCount(parsedMessages),
+              needsStreaming: parsed.stream === true,
+            };
+
+            const igniteDecision = await igniteRoute(routingContext, igniteCfg);
+
+            if (igniteDecision.error) {
+              console.log(`[IgniteRouter] Routing error: ${igniteDecision.error}`);
+              res.writeHead(400, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ error: igniteDecision.error }));
+              return;
+            }
+
+            if (igniteDecision.override?.detected) {
+              console.log(
+                `[IgniteRouter] Override detected: ${igniteDecision.override.source} -> ${igniteDecision.override.modelId}`,
+              );
+            } else if (igniteDecision.taskType) {
+              console.log(
+                `[IgniteRouter] Task: ${igniteDecision.taskType}, Tier: ${igniteDecision.tier}, Score: ${igniteDecision.complexityScore?.toFixed(2)}`,
+              );
+            }
+
+            // Map ignite candidates to the fallback chain format
+            const igniteCandidates = igniteDecision.candidateProviders.map((p) => ({
+              provider: p,
+              priorityScore: 0,
+              reasons: [] as string[],
+            }));
+
+            // Build the upstream URL
+            const apiBase = options.apiBase ?? BLOCKRUN_API;
+            const upstreamUrl = `${apiBase}${req.url}`;
+
+            const buildRequestInit = (providerId: string): RequestInit => {
+              const headersObj: Record<string, string> = {};
+              for (const [key, val] of Object.entries(req.headers)) {
+                if (key.toLowerCase() !== "host") {
+                  headersObj[key] = Array.isArray(val) ? (val[0] ?? "") : (val ?? "");
+                }
+              }
+              headersObj["Content-Type"] = "application/json";
+              if (providerId && providerId !== parsed.model) {
+                const bodyObj = JSON.parse(body.toString());
+                bodyObj.model = providerId;
+                return {
+                  method: "POST",
+                  headers: headersObj,
+                  body: JSON.stringify(bodyObj),
+                };
+              }
+              return {
+                method: req.method ?? "POST",
+                headers: headersObj,
+                body: body,
+              };
+            };
+
+            // Use callWithFallback for the actual model calls
+            const fallbackResult = await callWithFallback(
+              igniteCandidates,
+              (provider) => {
+                const init = buildRequestInit(provider.id);
+                return { url: upstreamUrl, init };
+              },
+              { timeoutMs: options.requestTimeoutMs ?? 30000, retryableOnly: true },
+            );
+
+            if (!fallbackResult.success) {
+              console.log(`[IgniteRouter] All models failed: ${fallbackResult.errorSummary}`);
+              res.writeHead(503, { "Content-Type": "application/json" });
+              res.end(
+                JSON.stringify({ error: fallbackResult.errorSummary ?? "All models failed" }),
+              );
+              return;
+            }
+
+            // Stream the successful response back
+            if (fallbackResult.finalResponse) {
+              res.statusCode = fallbackResult.finalResponse.status;
+              fallbackResult.finalResponse.headers.forEach((value, key) => {
+                if (
+                  key.toLowerCase() !== "transfer-encoding" &&
+                  key.toLowerCase() !== "content-length"
+                ) {
+                  res.setHeader(key, value);
+                }
+              });
+
+              if (fallbackResult.finalResponse.body) {
+                const reader = fallbackResult.finalResponse.body.getReader();
+                const stream = new ReadableStream({
+                  async start(controller) {
+                    try {
+                      while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) {
+                          controller.close();
+                          return;
+                        }
+                        controller.enqueue(value);
+                      }
+                    } catch (err) {
+                      controller.error(err);
+                    }
+                  },
+                });
+
+                finished(stream as unknown as NodeJS.ReadableStream, (err) => {
+                  if (err) console.error(`[IgniteRouter] Stream error: ${err.message}`);
+                });
+
+                (stream as unknown as NodeJS.ReadableStream).pipe(res);
+              }
+              return;
+            }
+          }
+
+          // Always route based on current request content (ClawRouter fallback)
           routingDecision = route(prompt, systemPrompt, maxTokens, {
             ...routerOpts,
             routingProfile: routingProfile ?? undefined,
@@ -3473,58 +3247,8 @@ async function proxyRequest(
   // Register this request as in-flight
   deduplicator.markInflight(dedupKey);
 
-  // --- Pre-request balance check ---
-  // Estimate cost and check if wallet has sufficient balance
-  // Skip if skipBalanceCheck is set (for testing) or if using free model
   let estimatedCostMicros: bigint | undefined;
-  // Use `let` so the balance-fallback path can update this when modelId is switched to a free model.
   let isFreeModel = FREE_MODELS.has(modelId ?? "");
-
-  if (modelId && !options.skipBalanceCheck && !isFreeModel) {
-    const estimated = estimateAmount(modelId, body.length, maxTokens);
-    if (estimated) {
-      estimatedCostMicros = BigInt(estimated);
-
-      // Apply extra buffer for balance check to prevent x402 failures after streaming starts.
-      // This is aggressive to avoid triggering OpenClaw's 5-24 hour billing cooldown.
-      const bufferedCostMicros =
-        (estimatedCostMicros * BigInt(Math.ceil(BALANCE_CHECK_BUFFER * 100))) / 100n;
-
-      // Check balance before proceeding (using buffered amount)
-      const sufficiency = await balanceMonitor.checkSufficient(bufferedCostMicros);
-
-      if (sufficiency.info.isEmpty || !sufficiency.sufficient) {
-        // Wallet is empty or insufficient — fallback to free model
-        const originalModel = modelId;
-        console.log(
-          `[ClawRouter] Wallet ${sufficiency.info.isEmpty ? "empty" : "insufficient"} (${sufficiency.info.balanceUSD}), falling back to free model: ${FREE_MODEL} (requested: ${originalModel})`,
-        );
-        modelId = FREE_MODEL;
-        isFreeModel = true; // keep in sync — budget logic gates on !isFreeModel
-        // Update the body with new model (map free/ → nvidia/ for upstream)
-        const parsed = JSON.parse(body.toString()) as Record<string, unknown>;
-        parsed.model = toUpstreamModelId(FREE_MODEL);
-        body = Buffer.from(JSON.stringify(parsed));
-
-        // Set notice to prepend to response so user knows about the fallback
-        balanceFallbackNotice = sufficiency.info.isEmpty
-          ? `> **⚠️ Wallet empty** — using free model. Fund your wallet to use ${originalModel}.\n\n`
-          : `> **⚠️ Insufficient balance** (${sufficiency.info.balanceUSD}) — using free model instead of ${originalModel}.\n\n`;
-
-        // Notify about the fallback
-        options.onLowBalance?.({
-          balanceUSD: sufficiency.info.balanceUSD,
-          walletAddress: sufficiency.info.walletAddress,
-        });
-      } else if (sufficiency.info.isLow) {
-        // Balance is low but sufficient — warn and proceed
-        options.onLowBalance?.({
-          balanceUSD: sufficiency.info.balanceUSD,
-          walletAddress: sufficiency.info.walletAddress,
-        });
-      }
-    }
-  }
 
   // --- Cost cap check: strict mode hard-stop ---
   // In 'strict' mode, reject if the projected session spend (accumulated + this request's
@@ -3935,8 +3659,6 @@ async function proxyRequest(
         body,
         tryModel,
         maxTokens,
-        payFetch,
-        balanceMonitor,
         combinedSignal,
       );
       clearTimeout(modelTimeoutId);
@@ -4053,8 +3775,6 @@ async function proxyRequest(
                 body,
                 tryModel,
                 maxTokens,
-                payFetch,
-                balanceMonitor,
                 retrySignal,
               );
               clearTimeout(retryTimeoutId);
@@ -4235,11 +3955,10 @@ async function proxyRequest(
         });
       }
 
-      // Log failed request so users can see it in `clawrouter logs`
-      // cost = actual x402 payment if any was made, otherwise 0
+      // Log failed request so users can see it in logs
       const errModel = routingDecision?.model ?? modelId;
       if (errModel) {
-        const errPayment = paymentStore.getStore()?.amountUsd ?? 0;
+        const errPayment = 0;
         logUsage({
           timestamp: new Date().toISOString(),
           model: errModel,
@@ -4638,11 +4357,6 @@ async function proxyRequest(
       }
     }
 
-    // --- Optimistic balance deduction after successful response ---
-    if (estimatedCostMicros !== undefined) {
-      balanceMonitor.deductEstimated(estimatedCostMicros);
-    }
-
     // Mark request as completed (for client disconnect cleanup)
     completed = true;
   } catch (err) {
@@ -4658,9 +4372,6 @@ async function proxyRequest(
     // Remove in-flight entry so retries aren't blocked
     deduplicator.removeInflight(dedupKey);
 
-    // Invalidate balance cache on payment failure (might be out of date)
-    balanceMonitor.invalidate();
-
     // Convert abort error to more descriptive timeout error
     if (err instanceof Error && err.name === "AbortError") {
       throw new Error(`Request timed out after ${timeoutMs}ms`, { cause: err });
@@ -4670,47 +4381,19 @@ async function proxyRequest(
   }
 
   // --- Usage logging (fire-and-forget) ---
-  // Use actual x402 payment amount from the per-request AsyncLocalStorage store.
-  // This is the real amount the user paid — no estimation needed.
-  // Falls back to local estimate only for free models (no x402 payment).
   const logModel = routingDecision?.model ?? modelId;
   if (logModel) {
-    const actualPayment = paymentStore.getStore()?.amountUsd ?? 0;
-
-    // For free models (no x402 payment), use local cost calculation as fallback
-    let logCost: number;
-    let logBaseline: number;
-    let logSavings: number;
-    if (actualPayment > 0) {
-      logCost = actualPayment;
-      // Calculate baseline for savings comparison
-      const chargedInputTokens = Math.ceil(body.length / 4);
-      const modelDef = BLOCKRUN_MODELS.find((m) => m.id === logModel);
-      const chargedOutputTokens = modelDef ? Math.min(maxTokens, modelDef.maxOutput) : maxTokens;
-      const baseline = calculateModelCost(
-        logModel,
-        routerOpts.modelPricing,
-        chargedInputTokens,
-        chargedOutputTokens,
-        routingProfile ?? undefined,
-      );
-      logBaseline = baseline.baselineCost;
-      logSavings = logBaseline > 0 ? Math.max(0, (logBaseline - logCost) / logBaseline) : 0;
-    } else {
-      const chargedInputTokens = Math.ceil(body.length / 4);
-      const costs = calculateModelCost(
-        logModel,
-        routerOpts.modelPricing,
-        chargedInputTokens,
-        maxTokens,
-        routingProfile ?? undefined,
-      );
-      // Free models: actual cost is $0 (no x402 payment ever made).
-      // MIN_PAYMENT_USD floor in calculateModelCost would falsely inflate stats.
-      logCost = FREE_MODELS.has(logModel) ? 0 : costs.costEstimate;
-      logBaseline = costs.baselineCost;
-      logSavings = FREE_MODELS.has(logModel) ? 1 : costs.savings;
-    }
+    const chargedInputTokens = Math.ceil(body.length / 4);
+    const costs = calculateModelCost(
+      logModel,
+      routerOpts.modelPricing,
+      chargedInputTokens,
+      maxTokens,
+      routingProfile ?? undefined,
+    );
+    const logCost = FREE_MODELS.has(logModel) ? 0 : costs.costEstimate;
+    const logBaseline = costs.baselineCost;
+    const logSavings = FREE_MODELS.has(logModel) ? 1 : costs.savings;
 
     const entry: UsageEntry = {
       timestamp: new Date().toISOString(),

@@ -1,19 +1,17 @@
 /**
- * @blockrun/clawrouter
+ * @igniterouter/igniterouter
  *
- * Smart LLM router for OpenClaw — 55+ models, x402 micropayments, 78% cost savings.
+ * Smart LLM router for OpenClaw — 55+ models, intelligent routing, 78% cost savings.
  * Routes each request to the cheapest model that can handle it.
  *
  * Usage:
  *   # Install the plugin
- *   openclaw plugins install @blockrun/clawrouter
- *
- *   # Fund your wallet with USDC on Base (address printed on install)
+ *   openclaw plugins install @igniterouter/igniterouter
  *
  *   # Use smart routing (auto-picks cheapest model)
- *   openclaw models set blockrun/auto
+ *   openclaw models set ignite/auto
  *
- *   # Or use any specific BlockRun model
+ *   # Or use any specific model
  *   openclaw models set openai/gpt-5.3
  */
 
@@ -23,19 +21,9 @@ import type {
   PluginCommandContext,
   OpenClawPluginCommandDefinition,
 } from "./types.js";
-import { blockrunProvider, setActiveProxy } from "./provider.js";
+import { igniteProvider, setActiveProxy } from "./provider.js";
 import { startProxy, getProxyPort } from "./proxy.js";
-import {
-  resolveOrGenerateWalletKey,
-  setupSolana,
-  savePaymentChain,
-  resolvePaymentChain,
-  WALLET_FILE,
-  MNEMONIC_FILE,
-} from "./auth.js";
-import type { WalletResolution } from "./auth.js";
 import type { RoutingConfig } from "./router/index.js";
-import { BalanceMonitor } from "./balance.js";
 import {
   loadExcludeList,
   addExclusion,
@@ -43,10 +31,6 @@ import {
   clearExclusions,
 } from "./exclude-models.js";
 
-/**
- * Wait for proxy health check to pass (quick check, not RPC).
- * Returns true if healthy within timeout, false otherwise.
- */
 async function waitForProxyHealth(port: number, timeoutMs = 3000): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -74,47 +58,27 @@ import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { VERSION } from "./version.js";
-import { privateKeyToAccount } from "viem/accounts";
 import { getStats, formatStatsAscii, clearStats } from "./stats.js";
 import { buildPartnerTools, PARTNER_SERVICES } from "./partners/index.js";
 
-/**
- * Install ClawRouter skills into OpenClaw's workspace skills directory.
- *
- * OpenClaw agents discover skills by scanning {workspaceDir}/skills/ for SKILL.md
- * files. While the plugin manifest (`openclaw.plugin.json`) exposes skills for
- * OpenClaw's internal registry, agents often try to read skills from the workspace
- * path directly. This copies our bundled skills so they're always resolvable.
- *
- * Workspace path follows OpenClaw's convention:
- *   - Default: ~/.openclaw/workspace/skills/
- *   - With profile: ~/.openclaw/workspace-{profile}/skills/
- *
- * Only copies if the skill is missing or the content has changed.
- */
 function installSkillsToWorkspace(logger: {
   info: (msg: string) => void;
   warn: (msg: string) => void;
 }) {
   try {
-    // Resolve the package root: dist/index.js -> package root
     const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
     const bundledSkillsDir = join(packageRoot, "skills");
 
     if (!existsSync(bundledSkillsDir)) {
-      // Skills directory not bundled (dev mode or stripped package)
       return;
     }
 
-    // Match OpenClaw's workspace resolution: ~/.openclaw/workspace[-{profile}]/
     const profile = (process["env"].OPENCLAW_PROFILE ?? "").trim().toLowerCase();
     const workspaceDirName =
       profile && profile !== "default" ? `workspace-${profile}` : "workspace";
     const workspaceSkillsDir = join(homedir(), ".openclaw", workspaceDirName, "skills");
     mkdirSync(workspaceSkillsDir, { recursive: true });
 
-    // Scan bundled skills: each subdirectory contains a SKILL.md
-    // Skip internal-only skills (release is for ClawRouter maintainers, not end users)
     const INTERNAL_SKILLS = new Set(["release"]);
     const entries = readdirSync(bundledSkillsDir, { withFileTypes: true });
     let installed = 0;
@@ -127,11 +91,9 @@ function installSkillsToWorkspace(logger: {
       const srcSkillFile = join(bundledSkillsDir, skillName, "SKILL.md");
       if (!existsSync(srcSkillFile)) continue;
 
-      // Use original skill name as folder (matches what agents expect)
       const destDir = join(workspaceSkillsDir, skillName);
       const destSkillFile = join(destDir, "SKILL.md");
 
-      // Check if update needed: compare content
       let needsUpdate = true;
       if (existsSync(destSkillFile)) {
         try {
@@ -158,42 +120,16 @@ function installSkillsToWorkspace(logger: {
   }
 }
 
-/**
- * Detect if we're running in shell completion mode.
- * When `openclaw completion --shell zsh` runs, it loads plugins but only needs
- * the completion script output - any stdout logging pollutes the script and
- * causes zsh to interpret colored text like `[plugins]` as glob patterns.
- */
 function isCompletionMode(): boolean {
   const args = process.argv;
-  // Check for: openclaw completion --shell <shell>
-  // argv[0] = node/bun, argv[1] = openclaw, argv[2] = completion
   return args.some((arg, i) => arg === "completion" && i >= 1 && i <= 3);
 }
 
-/**
- * Detect if we're running in gateway mode.
- * The proxy should ONLY start when the gateway is running.
- * During CLI commands (plugins, models, etc), the proxy keeps the process alive.
- */
 function isGatewayMode(): boolean {
   const args = process.argv;
-  // Gateway mode is: openclaw gateway start/restart/stop
   return args.includes("gateway");
 }
 
-/**
- * Inject BlockRun models config into OpenClaw config file.
- * This is required because registerProvider() alone doesn't make models available.
- *
- * CRITICAL: This function must be idempotent and handle ALL edge cases:
- * - Config file doesn't exist (create it)
- * - Config file exists but is empty/invalid (reinitialize)
- * - blockrun provider exists but has undefined fields (fix them)
- * - Config exists but uses old port/models (update them)
- *
- * This function is called on EVERY plugin load to ensure config is always correct.
- */
 function injectModelsConfig(logger: { info: (msg: string) => void }): void {
   const configDir = join(homedir(), ".openclaw");
   const configPath = join(configDir, "openclaw.json");
@@ -201,7 +137,6 @@ function injectModelsConfig(logger: { info: (msg: string) => void }): void {
   let config: Record<string, unknown> = {};
   let needsWrite = false;
 
-  // Create config directory if it doesn't exist
   if (!existsSync(configDir)) {
     try {
       mkdirSync(configDir, { recursive: true });
@@ -214,11 +149,6 @@ function injectModelsConfig(logger: { info: (msg: string) => void }): void {
     }
   }
 
-  // Load existing config or create new one
-  // IMPORTANT: On parse failure, we backup and skip writing to avoid clobbering
-  // other plugins' config (e.g. Telegram channels). This prevents a race condition
-  // where a partial/corrupt config file causes us to overwrite everything with
-  // only our models+agents sections.
   if (existsSync(configPath)) {
     try {
       const content = readTextFileSync(configPath).trim();
@@ -229,9 +159,6 @@ function injectModelsConfig(logger: { info: (msg: string) => void }): void {
         needsWrite = true;
       }
     } catch (err) {
-      // Config file exists but is corrupt/invalid JSON — likely a partial write
-      // from another plugin or a race condition during gateway restart.
-      // Backup the corrupt file and SKIP writing to avoid losing other config.
       const backupPath = `${configPath}.backup.${Date.now()}`;
       try {
         copyFileSync(configPath, backupPath);
@@ -242,14 +169,13 @@ function injectModelsConfig(logger: { info: (msg: string) => void }): void {
       logger.info(
         `Skipping config injection (corrupt file): ${err instanceof Error ? err.message : String(err)}`,
       );
-      return; // Don't write — we'd lose other plugins' config
+      return;
     }
   } else {
     logger.info("OpenClaw config not found, creating");
     needsWrite = true;
   }
 
-  // Initialize config structure
   if (!config.models) {
     config.models = {};
     needsWrite = true;
@@ -265,41 +191,32 @@ function injectModelsConfig(logger: { info: (msg: string) => void }): void {
 
   const providers = models.providers as Record<string, unknown>;
 
-  if (!providers.blockrun) {
-    // Create new blockrun provider config
-    providers.blockrun = {
+  if (!providers.ignite) {
+    providers.ignite = {
       baseUrl: expectedBaseUrl,
       api: "openai-completions",
-      // apiKey is required by pi-coding-agent's ModelRegistry for providers with models.
-      // We use a placeholder since the proxy handles real x402 auth internally.
-      apiKey: "x402-proxy-handles-auth",
+      apiKey: "ignite-proxy",
       models: OPENCLAW_MODELS,
     };
-    logger.info("Injected BlockRun provider config");
+    logger.info("Injected IgniteRouter provider config");
     needsWrite = true;
   } else {
-    // Validate and fix existing blockrun config
-    const blockrun = providers.blockrun as Record<string, unknown>;
+    const ignite = providers.ignite as Record<string, unknown>;
     let fixed = false;
 
-    // Fix: explicitly check for undefined/missing fields
-    if (!blockrun.baseUrl || blockrun.baseUrl !== expectedBaseUrl) {
-      blockrun.baseUrl = expectedBaseUrl;
+    if (!ignite.baseUrl || ignite.baseUrl !== expectedBaseUrl) {
+      ignite.baseUrl = expectedBaseUrl;
       fixed = true;
     }
-    // Ensure api field is present
-    if (!blockrun.api) {
-      blockrun.api = "openai-completions";
+    if (!ignite.api) {
+      ignite.api = "openai-completions";
       fixed = true;
     }
-    // Ensure apiKey is present (required by ModelRegistry for /model picker)
-    if (!blockrun.apiKey) {
-      blockrun.apiKey = "x402-proxy-handles-auth";
+    if (!ignite.apiKey) {
+      ignite.apiKey = "ignite-proxy";
       fixed = true;
     }
-    // Always refresh models list (ensures new models/aliases are available)
-    // Check both length AND content - new models may be added without changing count
-    const currentModels = blockrun.models as Array<{ id?: string }>;
+    const currentModels = ignite.models as Array<{ id?: string }>;
     const currentModelIds = new Set(
       Array.isArray(currentModels) ? currentModels.map((m) => m?.id).filter(Boolean) : [],
     );
@@ -311,19 +228,17 @@ function injectModelsConfig(logger: { info: (msg: string) => void }): void {
       expectedModelIds.some((id) => !currentModelIds.has(id));
 
     if (needsModelUpdate) {
-      blockrun.models = OPENCLAW_MODELS;
+      ignite.models = OPENCLAW_MODELS;
       fixed = true;
       logger.info(`Updated models list (${OPENCLAW_MODELS.length} models)`);
     }
 
     if (fixed) {
-      logger.info("Fixed incomplete BlockRun provider config");
+      logger.info("Fixed incomplete IgniteRouter provider config");
       needsWrite = true;
     }
   }
 
-  // Set blockrun/auto as default model ONLY on first install (not every load!)
-  // This respects user's model selection and prevents hijacking their choice.
   if (!config.agents) {
     config.agents = {};
     needsWrite = true;
@@ -335,25 +250,18 @@ function injectModelsConfig(logger: { info: (msg: string) => void }): void {
   }
   const defaults = agents.defaults as Record<string, unknown>;
   if (!defaults.model || typeof defaults.model !== "object" || Array.isArray(defaults.model)) {
-    // Convert plain string "blockrun/auto" → { primary: "blockrun/auto" }
-    // Also handles number, boolean, array, or any other non-object type
     const prev = typeof defaults.model === "string" ? defaults.model : undefined;
     defaults.model = prev ? { primary: prev } : {};
     needsWrite = true;
   }
   const model = defaults.model as Record<string, unknown>;
 
-  // ONLY set default if no primary model exists (first install)
-  // Do NOT override user's selection on subsequent loads
   if (!model.primary) {
-    model.primary = "blockrun/auto";
-    logger.info("Set default model to blockrun/auto (first install)");
+    model.primary = "ignite/auto";
+    logger.info("Set default model to ignite/auto (first install)");
     needsWrite = true;
   }
 
-  // Populate agents.defaults.models (the allowlist) with top BlockRun models.
-  // OpenClaw uses this as a whitelist — only listed models appear in the /model picker.
-  // Existing non-blockrun entries are preserved (e.g. from other providers).
   const TOP_MODELS = [
     "auto",
     "free",
@@ -373,7 +281,6 @@ function injectModelsConfig(logger: { info: (msg: string) => void }): void {
     "moonshot/kimi-k2.5",
     "xai/grok-3",
     "minimax/minimax-m2.5",
-    // Free models (free/ prefix so users see "free" in picker)
     "free/gpt-oss-120b",
     "free/gpt-oss-20b",
     "free/nemotron-ultra-253b",
@@ -391,9 +298,9 @@ function injectModelsConfig(logger: { info: (msg: string) => void }): void {
     needsWrite = true;
   }
   const allowlist = defaults.models as Record<string, unknown>;
-  const DEPRECATED_BLOCKRUN_MODELS = ["blockrun/xai/grok-code-fast-1"];
+  const DEPRECATED_MODELS = ["ignite/xai/grok-code-fast-1"];
   let removedDeprecatedCount = 0;
-  for (const key of DEPRECATED_BLOCKRUN_MODELS) {
+  for (const key of DEPRECATED_MODELS) {
     if (allowlist[key]) {
       delete allowlist[key];
       removedDeprecatedCount++;
@@ -403,11 +310,9 @@ function injectModelsConfig(logger: { info: (msg: string) => void }): void {
     needsWrite = true;
     logger.info(`Removed ${removedDeprecatedCount} deprecated model entries from allowlist`);
   }
-  // Additive-only: add TOP_MODELS entries if missing, never delete user-defined entries.
-  // Preserves any blockrun/* IDs the user has manually added outside this curated list.
   let addedCount = 0;
   for (const id of TOP_MODELS) {
-    const key = `blockrun/${id}`;
+    const key = `ignite/${id}`;
     if (!allowlist[key]) {
       allowlist[key] = {};
       addedCount++;
@@ -418,30 +323,21 @@ function injectModelsConfig(logger: { info: (msg: string) => void }): void {
     logger.info(`Added ${addedCount} models to allowlist (${TOP_MODELS.length} total)`);
   }
 
-  // Write config file if any changes were made
-  // Use atomic write (temp file + rename) to prevent partial writes that could
-  // corrupt the config and cause other plugins to lose their settings on next load.
   if (needsWrite) {
     try {
       const tmpPath = `${configPath}.tmp.${process.pid}`;
       writeFileSync(tmpPath, JSON.stringify(config, null, 2));
       renameSync(tmpPath, configPath);
-      logger.info("Smart routing enabled (blockrun/auto)");
+      logger.info("Smart routing enabled (ignite/auto)");
     } catch (err) {
       logger.info(`Failed to write config: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 }
 
-/**
- * Inject dummy auth profile for BlockRun into agent auth stores.
- * OpenClaw's agent system looks for auth credentials even if provider has auth: [].
- * We inject a placeholder so the lookup succeeds (proxy handles real auth internally).
- */
 function injectAuthProfile(logger: { info: (msg: string) => void }): void {
   const agentsDir = join(homedir(), ".openclaw", "agents");
 
-  // Create agents directory if it doesn't exist
   if (!existsSync(agentsDir)) {
     try {
       mkdirSync(agentsDir, { recursive: true });
@@ -454,12 +350,10 @@ function injectAuthProfile(logger: { info: (msg: string) => void }): void {
   }
 
   try {
-    // Find all agent directories
     let agents = readdirSync(agentsDir, { withFileTypes: true })
       .filter((d) => d.isDirectory())
       .map((d) => d.name);
 
-    // Always ensure "main" agent has auth (most common agent)
     if (!agents.includes("main")) {
       agents = ["main", ...agents];
     }
@@ -468,17 +362,14 @@ function injectAuthProfile(logger: { info: (msg: string) => void }): void {
       const authDir = join(agentsDir, agentId, "agent");
       const authPath = join(authDir, "auth-profiles.json");
 
-      // Create agent dir if needed
       if (!existsSync(authDir)) {
         try {
           mkdirSync(authDir, { recursive: true });
         } catch {
-          continue; // Skip if we can't create the dir
+          continue;
         }
       }
 
-      // Load or create auth-profiles.json with correct OpenClaw format
-      // Format: { version: 1, profiles: { "provider:profileId": { type, provider, key } } }
       let store: { version: number; profiles: Record<string, unknown> } = {
         version: 1,
         profiles: {},
@@ -486,33 +377,28 @@ function injectAuthProfile(logger: { info: (msg: string) => void }): void {
       if (existsSync(authPath)) {
         try {
           const existing = JSON.parse(readTextFileSync(authPath));
-          // Check if valid OpenClaw format (has version and profiles)
           if (existing.version && existing.profiles) {
             store = existing;
           }
-          // Old format without version/profiles is discarded and recreated
         } catch {
           // Invalid JSON, use fresh store
         }
       }
 
-      // Check if blockrun auth already exists (OpenClaw format: profiles["provider:profileId"])
-      const profileKey = "blockrun:default";
+      const profileKey = "ignite:default";
       if (store.profiles[profileKey]) {
-        continue; // Already configured
+        continue;
       }
 
-      // Inject placeholder auth for blockrun (OpenClaw format)
-      // The proxy handles real x402 auth internally, this just satisfies OpenClaw's lookup
       store.profiles[profileKey] = {
         type: "api_key",
-        provider: "blockrun",
-        key: "x402-proxy-handles-auth",
+        provider: "ignite",
+        key: "ignite-proxy",
       };
 
       try {
         writeFileSync(authPath, JSON.stringify(store, null, 2));
-        logger.info(`Injected BlockRun auth profile for agent: ${agentId}`);
+        logger.info(`Injected IgniteRouter auth profile for agent: ${agentId}`);
       } catch (err) {
         logger.info(
           `Could not inject auth for ${agentId}: ${err instanceof Error ? err.message : String(err)}`,
@@ -524,90 +410,24 @@ function injectAuthProfile(logger: { info: (msg: string) => void }): void {
   }
 }
 
-// Store active proxy handle for cleanup on gateway_stop
 let activeProxyHandle: Awaited<ReturnType<typeof startProxy>> | null = null;
 
-/**
- * Start the x402 proxy in the background.
- * Called from register() because OpenClaw's loader only invokes register(),
- * treating activate() as an alias (def.register ?? def.activate).
- */
 async function startProxyInBackground(api: OpenClawPluginApi): Promise<void> {
-  // Resolve wallet key: plugin config → saved file → env var → auto-generate.
-  // pluginConfig.walletKey is declared in openclaw.plugin.json configSchema but
-  // was previously never read here — that was a bug.
-  const configKey = api.pluginConfig?.walletKey as string | undefined;
-  let wallet: WalletResolution;
-
-  if (typeof configKey === "string" && /^0x[0-9a-fA-F]{64}$/.test(configKey)) {
-    const account = privateKeyToAccount(configKey as `0x${string}`);
-    wallet = { key: configKey, address: account.address, source: "config" };
-  } else {
-    if (configKey !== undefined) {
-      api.logger.warn(
-        `pluginConfig.walletKey is set but invalid (expected 0x + 64 hex chars) — falling back to saved wallet`,
-      );
-    }
-    wallet = await resolveOrGenerateWalletKey();
-  }
-
-  // Log wallet source
-  if (wallet.source === "generated") {
-    api.logger.warn(`════════════════════════════════════════════════`);
-    api.logger.warn(`  NEW WALLET GENERATED — BACK UP YOUR KEY NOW!`);
-    api.logger.warn(`  Address : ${wallet.address}`);
-    api.logger.warn(`  Run /wallet export to get your private key`);
-    api.logger.warn(`  Losing this key = losing your USDC funds`);
-    api.logger.warn(`════════════════════════════════════════════════`);
-  } else if (wallet.source === "saved") {
-    api.logger.info(`Using saved wallet: ${wallet.address}`);
-  } else if (wallet.source === "config") {
-    api.logger.info(`Using wallet from plugin config: ${wallet.address}`);
-  } else {
-    api.logger.info(`Using wallet from BLOCKRUN_WALLET_KEY: ${wallet.address}`);
-  }
-
-  // Resolve routing config overrides from plugin config
   const routingConfig = api.pluginConfig?.routing as Partial<RoutingConfig> | undefined;
 
-  const maxCostPerRunUsd =
-    typeof api.pluginConfig?.maxCostPerRun === "number"
-      ? (api.pluginConfig.maxCostPerRun as number)
-      : undefined;
-
-  const maxCostPerRunMode: "graceful" | "strict" =
-    api.pluginConfig?.maxCostPerRunMode === "strict" ? "strict" : "graceful";
-
-  if (maxCostPerRunUsd !== undefined) {
-    api.logger.info(
-      `Cost cap: $${maxCostPerRunUsd.toFixed(2)} per session (mode: ${maxCostPerRunMode})`,
-    );
-  }
-
   const proxy = await startProxy({
-    wallet,
     routingConfig,
-    maxCostPerRunUsd,
-    maxCostPerRunMode,
     onReady: (port) => {
-      api.logger.info(`BlockRun x402 proxy listening on port ${port}`);
+      api.logger.info(`IgniteRouter proxy listening on port ${port}`);
     },
     onError: (error) => {
-      api.logger.error(`BlockRun proxy error: ${error.message}`);
+      api.logger.error(`IgniteRouter proxy error: ${error.message}`);
     },
     onRouted: (decision) => {
       const cost = decision.costEstimate.toFixed(4);
       const saved = (decision.savings * 100).toFixed(0);
       api.logger.info(
         `[${decision.tier}] ${decision.model} $${cost} (saved ${saved}%) | ${decision.reasoning}`,
-      );
-    },
-    onLowBalance: (info) => {
-      api.logger.warn(`[!] Low balance: ${info.balanceUSD}. Fund wallet: ${info.walletAddress}`);
-    },
-    onInsufficientFunds: (info) => {
-      api.logger.error(
-        `[!] Insufficient funds. Balance: ${info.balanceUSD}, Needed: ${info.requiredUSD}. Fund wallet: ${info.walletAddress}`,
       );
     },
   });
@@ -622,60 +442,13 @@ async function startProxyInBackground(api: OpenClawPluginApi): Promise<void> {
     );
   }
 
-  api.logger.info(`ClawRouter ready — smart routing enabled`);
-  api.logger.info(`Pricing: Simple ~$0.001 | Code ~$0.01 | Complex ~$0.05 | Free: $0`);
-
-  // Non-blocking balance check AFTER proxy is ready (won't hang startup)
-  // Uses the proxy's chain-aware balance monitor and matching active-chain address.
-  const currentChain = await resolvePaymentChain();
-  const displayAddress =
-    currentChain === "solana" && proxy.solanaAddress ? proxy.solanaAddress : wallet.address;
-  const network = currentChain === "solana" ? "Solana" : "Base";
-  proxy.balanceMonitor
-    .checkBalance()
-    .then(async (balance) => {
-      if (balance.isEmpty) {
-        api.logger.info(`Wallet (${network}): ${displayAddress}`);
-        api.logger.info(
-          `Balance: $0.00 — send USDC on ${network} to the address above to unlock paid models.`,
-        );
-      } else if (balance.isLow) {
-        api.logger.info(
-          `Wallet (${network}): ${displayAddress} | Balance: ${balance.balanceUSD} (low — top up soon)`,
-        );
-      } else {
-        api.logger.info(`Wallet (${network}): ${displayAddress} | Balance: ${balance.balanceUSD}`);
-      }
-      // On Solana, if USDC is low/empty, check for SOL and suggest swap
-      if (currentChain === "solana" && (balance.isEmpty || balance.isLow)) {
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const solLamports: bigint = await (proxy.balanceMonitor as any).checkSolBalance();
-          // Only suggest if they have meaningful SOL (> 0.01 SOL = 10M lamports)
-          if (solLamports > 10_000_000n) {
-            const sol = Number(solLamports) / 1_000_000_000;
-            api.logger.info(
-              `You have ${sol.toFixed(2)} SOL — swap to USDC: https://jup.ag/swap/SOL-USDC`,
-            );
-          }
-        } catch {
-          // SOL check is best-effort, don't block startup
-        }
-      }
-    })
-    .catch(() => {
-      api.logger.info(`Wallet (${network}): ${displayAddress} | Balance: (checking...)`);
-    });
+  api.logger.info(`IgniteRouter ready — smart routing enabled`);
 }
 
-/**
- * /stats command handler for ClawRouter.
- * Shows usage statistics and cost savings.
- */
 async function createStatsCommand(): Promise<OpenClawPluginCommandDefinition> {
   return {
     name: "stats",
-    description: "Show ClawRouter usage statistics and cost savings",
+    description: "Show IgniteRouter usage statistics",
     acceptsArgs: true,
     requireAuth: false,
     handler: async (ctx: PluginCommandContext) => {
@@ -685,7 +458,7 @@ async function createStatsCommand(): Promise<OpenClawPluginCommandDefinition> {
         try {
           const { deletedFiles } = await clearStats();
           return {
-            text: `Stats cleared — ${deletedFiles} log file(s) deleted. Fresh start!`,
+            text: `Stats cleared — ${deletedFiles} log file(s) deleted.`,
           };
         } catch (err) {
           return {
@@ -698,7 +471,7 @@ async function createStatsCommand(): Promise<OpenClawPluginCommandDefinition> {
       const days = parseInt(arg, 10) || 7;
 
       try {
-        const stats = await getStats(Math.min(days, 30)); // Cap at 30 days
+        const stats = await getStats(Math.min(days, 30));
         const ascii = formatStatsAscii(stats);
 
         return {
@@ -714,10 +487,6 @@ async function createStatsCommand(): Promise<OpenClawPluginCommandDefinition> {
   };
 }
 
-/**
- * /exclude command handler for ClawRouter.
- * Manages excluded models — /exclude add|remove|clear <model>
- */
 async function createExcludeCommand(): Promise<OpenClawPluginCommandDefinition> {
   return {
     name: "exclude",
@@ -730,7 +499,6 @@ async function createExcludeCommand(): Promise<OpenClawPluginCommandDefinition> 
       const subcommand = parts[0]?.toLowerCase() || "";
       const modelArg = parts.slice(1).join(" ").trim();
 
-      // /exclude (no args) — show current list
       if (!subcommand) {
         const list = loadExcludeList();
         if (list.size === 0) {
@@ -747,7 +515,6 @@ async function createExcludeCommand(): Promise<OpenClawPluginCommandDefinition> 
         };
       }
 
-      // /exclude add <model>
       if (subcommand === "add") {
         if (!modelArg) {
           return {
@@ -765,7 +532,6 @@ async function createExcludeCommand(): Promise<OpenClawPluginCommandDefinition> 
         };
       }
 
-      // /exclude remove <model>
       if (subcommand === "remove") {
         if (!modelArg) {
           return { text: "Usage: /exclude remove <model>", isError: true };
@@ -787,7 +553,6 @@ async function createExcludeCommand(): Promise<OpenClawPluginCommandDefinition> 
         };
       }
 
-      // /exclude clear
       if (subcommand === "clear") {
         clearExclusions();
         return { text: "All model exclusions cleared." };
@@ -801,321 +566,33 @@ async function createExcludeCommand(): Promise<OpenClawPluginCommandDefinition> 
   };
 }
 
-/**
- * /wallet command handler for ClawRouter.
- * - /wallet or /wallet status: Show wallet address, balance, usage, and key file location
- * - /wallet export: Show private key for backup (with security warning)
- */
-async function createWalletCommand(): Promise<OpenClawPluginCommandDefinition> {
-  return {
-    name: "wallet",
-    description: "Show BlockRun wallet info, usage stats, or export private key",
-    acceptsArgs: true,
-    requireAuth: true,
-    handler: async (ctx: PluginCommandContext) => {
-      const subcommand = ctx.args?.trim().toLowerCase() || "status";
-
-      // Read wallet key if it exists
-      let walletKey: string | undefined;
-      let address: string | undefined;
-      try {
-        if (existsSync(WALLET_FILE)) {
-          walletKey = readTextFileSync(WALLET_FILE).trim();
-          if (walletKey.startsWith("0x") && walletKey.length === 66) {
-            const account = privateKeyToAccount(walletKey as `0x${string}`);
-            address = account.address;
-          }
-        }
-      } catch {
-        // Wallet file doesn't exist or is invalid
-      }
-
-      if (!walletKey || !address) {
-        return {
-          text: `No ClawRouter wallet found.\n\nRun \`openclaw plugins install @blockrun/clawrouter\` to generate a wallet.`,
-          isError: true,
-        };
-      }
-
-      if (subcommand === "export") {
-        // Export private key + mnemonic for backup
-        const lines = [
-          "**ClawRouter Wallet Export**",
-          "",
-          "**SECURITY WARNING**: Your private key and mnemonic control your wallet funds.",
-          "Never share these. Anyone with them can spend your USDC.",
-          "",
-          "**EVM (Base):**",
-          `  Address: \`${address}\``,
-          `  Private Key: \`${walletKey}\``,
-        ];
-
-        // Include mnemonic if it exists (Solana wallet derived from it)
-        let hasMnemonic = false;
-        try {
-          if (existsSync(MNEMONIC_FILE)) {
-            const mnemonic = readTextFileSync(MNEMONIC_FILE).trim();
-            if (mnemonic) {
-              hasMnemonic = true;
-              // Derive Solana address for display
-              const { deriveSolanaKeyBytes } = await import("./wallet.js");
-              const solKeyBytes = deriveSolanaKeyBytes(mnemonic);
-              const { createKeyPairSignerFromPrivateKeyBytes } = await import("@solana/kit");
-              const signer = await createKeyPairSignerFromPrivateKeyBytes(solKeyBytes);
-
-              lines.push(
-                "",
-                "**Solana:**",
-                `  Address: \`${signer.address}\``,
-                `  (Derived from mnemonic below)`,
-                "",
-                "**Mnemonic (24 words):**",
-                `\`${mnemonic}\``,
-                "",
-                "CRITICAL: Back up this mnemonic. It is the ONLY way to recover your Solana wallet.",
-              );
-            }
-          }
-        } catch {
-          // No mnemonic - EVM-only wallet
-        }
-
-        lines.push(
-          "",
-          "**To restore on a new machine:**",
-          "1. Set the environment variable before running OpenClaw:",
-          `   \`export BLOCKRUN_WALLET_KEY=${walletKey}\``,
-          "2. Or save to file:",
-          `   \`mkdir -p ~/.openclaw/blockrun && echo "${walletKey}" > ~/.openclaw/blockrun/wallet.key && chmod 600 ~/.openclaw/blockrun/wallet.key\``,
-        );
-
-        if (hasMnemonic) {
-          lines.push(
-            "3. Restore the mnemonic for Solana:",
-            `   \`echo "<your mnemonic>" > ~/.openclaw/blockrun/mnemonic && chmod 600 ~/.openclaw/blockrun/mnemonic\``,
-          );
-        }
-
-        return { text: lines.join("\n") };
-      }
-
-      if (subcommand === "solana") {
-        // Switch to Solana chain. If mnemonic already exists, just persist the selection.
-        // If no mnemonic, set up Solana wallet first.
-        try {
-          let solanaAddr: string | undefined;
-
-          // Check if Solana wallet is already set up (mnemonic exists)
-          if (existsSync(MNEMONIC_FILE)) {
-            const existingMnemonic = readTextFileSync(MNEMONIC_FILE).trim();
-            if (existingMnemonic) {
-              // Already set up — just switch chain
-              await savePaymentChain("solana");
-              const { deriveSolanaKeyBytes } = await import("./wallet.js");
-              const solKeyBytes = deriveSolanaKeyBytes(existingMnemonic);
-              const { createKeyPairSignerFromPrivateKeyBytes } = await import("@solana/kit");
-              const signer = await createKeyPairSignerFromPrivateKeyBytes(solKeyBytes);
-              solanaAddr = signer.address;
-              return {
-                text: [
-                  "Payment chain set to Solana. Restart the gateway to apply.",
-                  "",
-                  `**Solana Address:** \`${solanaAddr}\``,
-                  `**Fund with USDC on Solana:** https://solscan.io/account/${solanaAddr}`,
-                ].join("\n"),
-              };
-            }
-          }
-
-          // No mnemonic — first-time Solana setup
-          const { solanaPrivateKeyBytes } = await setupSolana();
-          await savePaymentChain("solana");
-          const { createKeyPairSignerFromPrivateKeyBytes } = await import("@solana/kit");
-          const signer = await createKeyPairSignerFromPrivateKeyBytes(solanaPrivateKeyBytes);
-          return {
-            text: [
-              "**Solana Wallet Set Up**",
-              "",
-              `**Solana Address:** \`${signer.address}\``,
-              `**Mnemonic File:** \`${MNEMONIC_FILE}\``,
-              "",
-              "Your existing EVM wallet is unchanged.",
-              "Payment chain set to Solana. Restart the gateway to apply.",
-              "",
-              `**Fund with USDC on Solana:** https://solscan.io/account/${signer.address}`,
-            ].join("\n"),
-          };
-        } catch (err) {
-          return {
-            text: `Failed to set up Solana: ${err instanceof Error ? err.message : String(err)}`,
-            isError: true,
-          };
-        }
-      }
-
-      if (subcommand === "base") {
-        // Switch back to Base (EVM) payment chain
-        try {
-          await savePaymentChain("base");
-          return {
-            text: "Payment chain set to Base (EVM). Restart the gateway to apply.",
-          };
-        } catch (err) {
-          return {
-            text: `Failed to set payment chain: ${err instanceof Error ? err.message : String(err)}`,
-            isError: true,
-          };
-        }
-      }
-
-      // Default: show wallet status
-      let evmBalanceText: string;
-      try {
-        const monitor = new BalanceMonitor(address);
-        const balance = await monitor.checkBalance();
-        evmBalanceText = `Balance: ${balance.balanceUSD}`;
-      } catch {
-        evmBalanceText = "Balance: (could not check)";
-      }
-
-      // Check for Solana wallet
-      let solanaSection = "";
-      try {
-        if (existsSync(MNEMONIC_FILE)) {
-          const { deriveSolanaKeyBytes } = await import("./wallet.js");
-          const mnemonic = readTextFileSync(MNEMONIC_FILE).trim();
-          if (mnemonic) {
-            const solKeyBytes = deriveSolanaKeyBytes(mnemonic);
-            const { createKeyPairSignerFromPrivateKeyBytes } = await import("@solana/kit");
-            const signer = await createKeyPairSignerFromPrivateKeyBytes(solKeyBytes);
-            const solAddr = signer.address;
-
-            let solBalanceText = "Balance: (checking...)";
-            try {
-              const { SolanaBalanceMonitor } = await import("./solana-balance.js");
-              const solMonitor = new SolanaBalanceMonitor(solAddr);
-              const solBalance = await solMonitor.checkBalance();
-              solBalanceText = `Balance: ${solBalance.balanceUSD}`;
-            } catch {
-              solBalanceText = "Balance: (could not check)";
-            }
-
-            solanaSection = [
-              "",
-              "**Solana:**",
-              `  Address: \`${solAddr}\``,
-              `  ${solBalanceText}`,
-              `  Fund (USDC only): https://solscan.io/account/${solAddr}`,
-            ].join("\n");
-          }
-        }
-      } catch {
-        // No Solana wallet - that's fine
-      }
-
-      // Show current chain selection
-      const currentChain = await resolvePaymentChain();
-
-      // Usage summary (last 7 days) — shows all models including openai/, anthropic/, etc.
-      let usageSection = "";
-      try {
-        const stats = await getStats(7);
-        if (stats.totalRequests > 0) {
-          const modelLines = Object.entries(stats.byModel)
-            .sort((a, b) => b[1].count - a[1].count)
-            .slice(0, 8)
-            .map(
-              ([model, data]) =>
-                `  ${model.length > 30 ? model.slice(0, 27) + "..." : model}  ${data.count} reqs  $${data.cost.toFixed(4)}`,
-            );
-
-          usageSection = [
-            "",
-            `**Usage (${stats.period}):**`,
-            `  Total: ${stats.totalRequests} requests, $${stats.totalCost.toFixed(4)} spent`,
-            stats.totalSavings > 0
-              ? `  Saved: $${stats.totalSavings.toFixed(4)} (${stats.savingsPercentage.toFixed(0)}% vs Opus baseline)`
-              : "",
-            "",
-            "**Top Models:**",
-            ...modelLines,
-          ]
-            .filter(Boolean)
-            .join("\n");
-        }
-      } catch {
-        // Stats not available — skip
-      }
-
-      return {
-        text: [
-          "**ClawRouter Wallet**",
-          "",
-          `**Payment Chain:** ${currentChain === "solana" ? "Solana" : "Base (EVM)"}`,
-          "",
-          "**Base (EVM):**",
-          `  Address: \`${address}\``,
-          `  ${evmBalanceText}`,
-          `  Fund (USDC only): https://basescan.org/address/${address}`,
-          solanaSection,
-          usageSection,
-          "",
-          `**Key File:** \`${WALLET_FILE}\``,
-          "",
-          "**Commands:**",
-          "• `/wallet` - Show this status",
-          "• `/wallet export` - Export private key for backup",
-          "• `/stats` - Detailed usage breakdown",
-          !solanaSection ? "• `/wallet solana` - Enable Solana payments" : "",
-          solanaSection ? "• `/wallet base` - Switch to Base (EVM)" : "",
-          solanaSection ? "• `/wallet solana` - Switch to Solana" : "",
-        ]
-          .filter(Boolean)
-          .join("\n"),
-      };
-    },
-  };
-}
-
 const plugin: OpenClawPluginDefinition = {
-  id: "clawrouter",
-  name: "ClawRouter",
-  description: "Smart LLM router — 55+ models, x402 micropayments, 78% cost savings",
+  id: "igniterouter",
+  name: "IgniteRouter",
+  description: "Smart LLM router — 55+ models, intelligent routing, 78% cost savings",
   version: VERSION,
 
   register(api: OpenClawPluginApi) {
-    // Check if ClawRouter is disabled via environment variable
-    // Usage: CLAWROUTER_DISABLED=true openclaw gateway start
     const isDisabled =
-      process["env"].CLAWROUTER_DISABLED === "true" || process["env"].CLAWROUTER_DISABLED === "1";
+      process["env"].IGNITEROUTER_DISABLED === "true" ||
+      process["env"].IGNITEROUTER_DISABLED === "1";
     if (isDisabled) {
-      api.logger.info("ClawRouter disabled (CLAWROUTER_DISABLED=true). Using default routing.");
+      api.logger.info("IgniteRouter disabled (IGNITEROUTER_DISABLED=true). Using default routing.");
       return;
     }
 
-    // Install skills into OpenClaw workspace so agents can discover them
-    // Must run before completion short-circuit so skills are available even on first install
     installSkillsToWorkspace(api.logger);
 
-    // Skip heavy initialization in completion mode — only completion script is needed
-    // Logging to stdout during completion pollutes the script and causes zsh errors
     if (isCompletionMode()) {
-      api.registerProvider(blockrunProvider);
+      api.registerProvider(igniteProvider);
       return;
     }
 
-    // Register BlockRun as a provider (sync — available immediately)
-    api.registerProvider(blockrunProvider);
+    api.registerProvider(igniteProvider);
 
-    // Inject models config into OpenClaw config file
-    // This persists the config so models are recognized on restart
     injectModelsConfig(api.logger);
-
-    // Inject dummy auth profiles into agent auth stores
-    // OpenClaw's agent system looks for auth even if provider has auth: []
     injectAuthProfile(api.logger);
 
-    // Also set runtime config for immediate availability
     const runtimePort = getProxyPort();
     if (!api.config.models) {
       api.config.models = { providers: {} };
@@ -1123,17 +600,15 @@ const plugin: OpenClawPluginDefinition = {
     if (!api.config.models.providers) {
       api.config.models.providers = {};
     }
-    api.config.models.providers.blockrun = {
+    api.config.models.providers.ignite = {
       baseUrl: `http://127.0.0.1:${runtimePort}/v1`,
       api: "openai-completions",
-      // apiKey is required by pi-coding-agent's ModelRegistry for providers with models.
-      apiKey: "x402-proxy-handles-auth",
+      apiKey: "ignite-proxy",
       models: OPENCLAW_MODELS,
     };
 
-    api.logger.info("BlockRun provider registered (55+ models via x402)");
+    api.logger.info("IgniteRouter provider registered (55+ models)");
 
-    // Register partner API tools (Twitter/X lookup, etc.)
     try {
       const proxyBaseUrl = `http://127.0.0.1:${runtimePort}`;
       const partnerTools = buildPartnerTools(proxyBaseUrl);
@@ -1146,7 +621,6 @@ const plugin: OpenClawPluginDefinition = {
         );
       }
 
-      // Register /partners command
       api.registerCommand({
         name: "partners",
         description: "List available partner APIs and pricing",
@@ -1157,12 +631,12 @@ const plugin: OpenClawPluginDefinition = {
             return { text: "No partner APIs available." };
           }
 
-          const lines = ["**Partner APIs** (paid via your ClawRouter wallet)", ""];
+          const lines = ["**Partner APIs**", ""];
 
           for (const svc of PARTNER_SERVICES) {
             lines.push(`**${svc.name}** (${svc.partner})`);
             lines.push(`  ${svc.description}`);
-            lines.push(`  Tool: \`${`blockrun_${svc.id}`}\``);
+            lines.push(`  Tool: \`${`ignite_${svc.id}`}\``);
             lines.push(
               `  Pricing: ${svc.pricing.perUnit} per ${svc.pricing.unit} (min ${svc.pricing.minimum}, max ${svc.pricing.maximum})`,
             );
@@ -1181,18 +655,6 @@ const plugin: OpenClawPluginDefinition = {
       );
     }
 
-    // Register /wallet command — shows wallet info + per-model usage stats
-    createWalletCommand()
-      .then((walletCommand) => {
-        api.registerCommand(walletCommand);
-      })
-      .catch((err) => {
-        api.logger.warn(
-          `Failed to register /wallet command: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      });
-
-    // Register /stats command for usage statistics
     createStatsCommand()
       .then((statsCommand) => {
         api.registerCommand(statsCommand);
@@ -1203,7 +665,6 @@ const plugin: OpenClawPluginDefinition = {
         );
       });
 
-    // Register /exclude command for model exclusion management
     createExcludeCommand()
       .then((excludeCommand) => {
         api.registerCommand(excludeCommand);
@@ -1214,19 +675,14 @@ const plugin: OpenClawPluginDefinition = {
         );
       });
 
-    // Register a service with stop() for cleanup on gateway shutdown
-    // This prevents EADDRINUSE when the gateway restarts
     api.registerService({
-      id: "clawrouter-proxy",
-      start: () => {
-        // No-op: proxy is started below in non-blocking mode
-      },
+      id: "igniterouter-proxy",
+      start: () => {},
       stop: async () => {
-        // Close proxy on gateway shutdown to release port 8402
         if (activeProxyHandle) {
           try {
             await activeProxyHandle.close();
-            api.logger.info("BlockRun proxy closed");
+            api.logger.info("IgniteRouter proxy closed");
           } catch (err) {
             api.logger.warn(
               `Failed to close proxy: ${err instanceof Error ? err.message : String(err)}`,
@@ -1237,45 +693,13 @@ const plugin: OpenClawPluginDefinition = {
       },
     });
 
-    // Skip proxy startup unless we're in gateway mode
-    // The proxy keeps the Node.js event loop alive, preventing CLI commands from exiting
-    // The proxy will start automatically when the gateway runs
     if (!isGatewayMode()) {
-      // Generate wallet on first install (even outside gateway mode)
-      // This ensures users can see their wallet address immediately after install
-      resolveOrGenerateWalletKey()
-        .then(({ address, source }) => {
-          if (source === "generated") {
-            api.logger.warn(`════════════════════════════════════════════════`);
-            api.logger.warn(`  NEW WALLET GENERATED — BACK UP YOUR KEY NOW!`);
-            api.logger.warn(`  Address : ${address}`);
-            api.logger.warn(`  Run /wallet export to get your private key`);
-            api.logger.warn(`  Losing this key = losing your USDC funds`);
-            api.logger.warn(`════════════════════════════════════════════════`);
-          } else if (source === "saved") {
-            api.logger.info(`Using saved wallet: ${address}`);
-          } else if (source === "config") {
-            api.logger.info(`Using wallet from plugin config: ${address}`);
-          } else {
-            api.logger.info(`Using wallet from BLOCKRUN_WALLET_KEY: ${address}`);
-          }
-        })
-        .catch((err) => {
-          api.logger.warn(
-            `Failed to initialize wallet: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        });
       api.logger.info("Not in gateway mode — proxy will start when gateway runs");
       return;
     }
 
-    // Start x402 proxy in background WITHOUT blocking register()
-    // CRITICAL: Do NOT await here - this was blocking model selection UI for 3+ seconds
-    // causing Chandler's "infinite loop" issue where model selection never finishes
-    // Note: startProxyInBackground calls resolveOrGenerateWalletKey internally
     startProxyInBackground(api)
       .then(async () => {
-        // Proxy started successfully - verify health
         const port = getProxyPort();
         const healthy = await waitForProxyHealth(port, 5000);
         if (!healthy) {
@@ -1284,7 +708,7 @@ const plugin: OpenClawPluginDefinition = {
       })
       .catch((err) => {
         api.logger.error(
-          `Failed to start BlockRun proxy: ${err instanceof Error ? err.message : String(err)}`,
+          `Failed to start IgniteRouter proxy: ${err instanceof Error ? err.message : String(err)}`,
         );
       });
   },
@@ -1292,18 +716,9 @@ const plugin: OpenClawPluginDefinition = {
 
 export default plugin;
 
-// Re-export for programmatic use
 export { startProxy, getProxyPort } from "./proxy.js";
-export type {
-  ProxyOptions,
-  ProxyHandle,
-  WalletConfig,
-  PaymentChain,
-  LowBalanceInfo,
-  InsufficientFundsInfo,
-} from "./proxy.js";
-export type { WalletResolution } from "./auth.js";
-export { blockrunProvider } from "./provider.js";
+export type { ProxyOptions, ProxyHandle } from "./proxy.js";
+export { igniteProvider } from "./provider.js";
 export {
   OPENCLAW_MODELS,
   BLOCKRUN_MODELS,
@@ -1326,43 +741,6 @@ export { logUsage } from "./logger.js";
 export type { UsageEntry } from "./logger.js";
 export { RequestDeduplicator } from "./dedup.js";
 export type { CachedResponse } from "./dedup.js";
-export { BalanceMonitor, BALANCE_THRESHOLDS } from "./balance.js";
-export type { BalanceInfo, SufficiencyResult } from "./balance.js";
-export { SolanaBalanceMonitor } from "./solana-balance.js";
-export type { SolanaBalanceInfo } from "./solana-balance.js";
-export {
-  SpendControl,
-  FileSpendControlStorage,
-  InMemorySpendControlStorage,
-  formatDuration,
-} from "./spend-control.js";
-export type {
-  SpendWindow,
-  SpendLimits,
-  SpendRecord,
-  SpendingStatus,
-  CheckResult,
-  SpendControlStorage,
-  SpendControlOptions,
-} from "./spend-control.js";
-export {
-  generateWalletMnemonic,
-  isValidMnemonic,
-  deriveEvmKey,
-  deriveSolanaKeyBytes,
-  deriveAllKeys,
-} from "./wallet.js";
-export type { DerivedKeys } from "./wallet.js";
-export { setupSolana, savePaymentChain, loadPaymentChain, resolvePaymentChain } from "./auth.js";
-export {
-  InsufficientFundsError,
-  EmptyWalletError,
-  RpcError,
-  isInsufficientFundsError,
-  isEmptyWalletError,
-  isBalanceError,
-  isRpcError,
-} from "./errors.js";
 export { fetchWithRetry, isRetryable, DEFAULT_RETRY_CONFIG } from "./retry.js";
 export type { RetryConfig } from "./retry.js";
 export { getStats, formatStatsAscii, clearStats } from "./stats.js";

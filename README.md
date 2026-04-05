@@ -36,6 +36,42 @@ Agents can only sign transactions.<br><br>
 
 ---
 
+# IgniteRouter
+
+Smart LLM router for OpenClaw and AtomicBot. Bring your own models and API keys.
+Routes each request to the right model based on task type and complexity.
+Automatic fallback if a model fails.
+
+## Quick config (openclaw.yaml)
+
+```yaml
+plugins:
+  - id: igniterouter
+    config:
+      defaultPriority: cost
+      providers:
+        - id: openai/gpt-4o
+          apiKey: sk-xxx
+          tier: COMPLEX
+          specialisedFor: [reasoning]
+        - id: openai/gpt-4o-mini
+          apiKey: sk-xxx
+          tier: SIMPLE
+        - id: google/gemini-2.5-flash
+          apiKey: xxx
+          tier: SIMPLE
+          specialisedFor: [vision]
+          priorityForTasks:
+            vision: 1
+        - id: ollama/llama3:70b
+          baseUrl: http://localhost:11434
+          tier: COMPLEX
+```
+
+If no providers are configured, IgniteRouter falls back to ClawRouter behaviour automatically.
+
+---
+
 ## Why ClawRouter exists
 
 Every other LLM router was built for **human developers** — create an account, get an API key, pick a model from a dashboard, pay with a credit card.

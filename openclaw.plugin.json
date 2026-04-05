@@ -1,26 +1,53 @@
 {
-  "id": "clawrouter",
-  "name": "ClawRouter",
-  "description": "Smart LLM router — 41+ models, x402 micropayments, 92% cost savings",
+  "id": "igniterouter",
+  "name": "IgniteRouter",
+  "description": "Smart LLM router — bring your own models and API keys. Task-aware routing, automatic fallback.",
   "skills": ["./skills"],
   "configSchema": {
     "type": "object",
     "properties": {
-      "walletKey": {
+      "defaultPriority": {
         "type": "string",
-        "description": "EVM wallet private key (0x...). Optional — auto-generated if not set."
+        "enum": ["cost", "speed", "quality"],
+        "default": "cost",
+        "description": "How to rank models when multiple are available"
       },
-      "routing": {
-        "type": "object",
-        "description": "Override default routing configuration"
+      "providers": {
+        "type": "array",
+        "description": "Your LLM providers with API keys",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Model ID e.g. openai/gpt-4o"
+            },
+            "apiKey": {
+              "type": "string",
+              "description": "API key for this provider"
+            },
+            "baseUrl": {
+              "type": "string",
+              "description": "Custom endpoint (for Ollama etc)"
+            },
+            "tier": {
+              "type": "string",
+              "enum": ["SIMPLE", "MEDIUM", "COMPLEX", "EXPERT"],
+              "description": "Which complexity tier this model handles"
+            },
+            "specialisedFor": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Task types this model is specialized for"
+            },
+            "priorityForTasks": {
+              "type": "object",
+              "description": "Explicit rank overrides for specific task types"
+            }
+          },
+          "required": ["id", "tier"]
+        }
       }
-    }
-  },
-  "uiHints": {
-    "walletKey": {
-      "label": "Wallet Private Key",
-      "sensitive": true,
-      "placeholder": "0x... (optional — auto-generated)"
     }
   }
 }

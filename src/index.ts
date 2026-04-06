@@ -1084,6 +1084,14 @@ const plugin: OpenClawPluginDefinition = {
   version: VERSION,
 
   register(api: OpenClawPluginApi) {
+    // Guard against repeated register() calls within the same process.
+    // OpenClaw v2026.4.5 parallel plugin loading (and 'openclaw onboard') can
+    // invoke register() many times per second. We use process.__clawrouterRegistered
+    // so the flag survives ESM module cache clears but resets on true process restart.
+    const proc = process as NodeJS.Process & { __clawrouterRegistered?: boolean };
+    if (proc.__clawrouterRegistered) return;
+    proc.__clawrouterRegistered = true;
+
     // Check if ClawRouter is disabled via environment variable
     // Usage: CLAWROUTER_DISABLED=true openclaw gateway start
     const isDisabled =

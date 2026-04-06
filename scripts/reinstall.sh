@@ -172,10 +172,31 @@ try {
 // Clean plugin entries
 if (c.plugins?.entries?.clawrouter) delete c.plugins.entries.clawrouter;
 if (c.plugins?.installs?.clawrouter) delete c.plugins.installs.clawrouter;
-// Clean plugins.allow (removes stale clawrouter reference)
+
+// Clean plugins.allow — remove clawrouter (will be re-added after install)
+// and strip any non-bundled plugin names that don't exist (e.g. "wallet" added
+// by an AI agent trying to fix a different problem — causes a warning on every start).
 if (Array.isArray(c.plugins?.allow)) {
-  c.plugins.allow = c.plugins.allow.filter(p => p !== 'clawrouter' && p !== '@blockrun/clawrouter');
+  const BUNDLED_OPENCLAW_PLUGINS = [
+    // OpenClaw v2026.x bundled plugin IDs (safe to keep in allow list)
+    'http', 'mcp', 'computer-use', 'browser', 'code', 'image', 'voice',
+    'search', 'memory', 'calendar', 'email', 'slack', 'discord', 'telegram',
+    'whatsapp', 'matrix', 'teams', 'notion', 'github', 'jira', 'linear',
+    'comfyui', 'crossmint',
+  ];
+  const before = c.plugins.allow.length;
+  c.plugins.allow = c.plugins.allow.filter(p => {
+    if (p === 'clawrouter' || p === '@blockrun/clawrouter') return false; // re-added later
+    if (BUNDLED_OPENCLAW_PLUGINS.includes(p)) return true; // known-good bundled plugins
+    // Keep entries that look like npm package names (scoped or plain)
+    if (p.startsWith('@') || p.includes('/')) return true;
+    // Drop bare single-word entries that aren't bundled (e.g. "wallet" added by mistake)
+    return false;
+  });
+  const removed = before - c.plugins.allow.length;
+  if (removed > 0) console.log('  Removed ' + removed + ' stale plugins.allow entry(ies)');
 }
+
 atomicWrite(f, JSON.stringify(c, null, 2));
 console.log('  Config cleaned');
 "

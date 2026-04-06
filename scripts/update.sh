@@ -172,13 +172,41 @@ const configPath = '$CONFIG_PATH';
 if (!fs.existsSync(configPath)) process.exit(0);
 try {
   const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  let changed = false;
+
+  // Remove stale plugin entry
   const entries = config?.plugins?.entries;
   if (entries && entries.clawrouter) {
     delete entries.clawrouter;
+    changed = true;
+    console.log('  Removed stale plugin entry');
+  }
+
+  // Clean plugins.allow — remove clawrouter (re-added later) and any stale bare
+  // single-word entries that aren't bundled OpenClaw plugins (e.g. "wallet" added
+  // by an AI agent — shows a warning on every gateway start).
+  if (Array.isArray(config?.plugins?.allow)) {
+    const BUNDLED = [
+      'http','mcp','computer-use','browser','code','image','voice',
+      'search','memory','calendar','email','slack','discord','telegram',
+      'whatsapp','matrix','teams','notion','github','jira','linear',
+      'comfyui','crossmint',
+    ];
+    const before = config.plugins.allow.length;
+    config.plugins.allow = config.plugins.allow.filter(p => {
+      if (p === 'clawrouter' || p === '@blockrun/clawrouter') return false;
+      if (BUNDLED.includes(p)) return true;
+      if (p.startsWith('@') || p.includes('/')) return true;
+      return false;
+    });
+    const removed = before - config.plugins.allow.length;
+    if (removed > 0) { changed = true; console.log('  Removed ' + removed + ' stale plugins.allow entry(ies)'); }
+  }
+
+  if (changed) {
     const tmp = configPath + '.tmp.' + process.pid;
     fs.writeFileSync(tmp, JSON.stringify(config, null, 2));
     fs.renameSync(tmp, configPath);
-    console.log('  Removed stale plugin entry');
   } else {
     console.log('  Config clean');
   }

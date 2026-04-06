@@ -1005,7 +1005,7 @@ function restartProxyForChainSwitch(api: OpenClawPluginApi): void {
 
 function createWalletCommand(api?: OpenClawPluginApi): OpenClawPluginCommandDefinition {
   return {
-    name: "blockrun",
+    name: "wallet",
     description: "Show BlockRun wallet info, balance, chain, or export key",
     acceptsArgs: true,
     requireAuth: true,
@@ -1268,12 +1268,12 @@ function createWalletCommand(api?: OpenClawPluginApi): OpenClawPluginCommandDefi
           `**Key File:** \`${WALLET_FILE}\``,
           "",
           "**Commands:**",
-          "• `/blockrun` - Show this status",
-          "• `/blockrun export` - Export private key for backup",
+          "• `/wallet` - Show this status",
+          "• `/wallet export` - Export private key for backup",
           "• `/stats` - Detailed usage breakdown",
-          !solanaSection ? "• `/blockrun solana` - Enable Solana payments" : "",
-          solanaSection ? "• `/blockrun base` - Switch to Base (EVM)" : "",
-          solanaSection ? "• `/blockrun solana` - Switch to Solana" : "",
+          !solanaSection ? "• `/wallet solana` - Enable Solana payments" : "",
+          solanaSection ? "• `/wallet base` - Switch to Base (EVM)" : "",
+          solanaSection ? "• `/wallet solana` - Switch to Solana" : "",
         ]
           .filter(Boolean)
           .join("\n"),
@@ -1404,20 +1404,19 @@ const plugin: OpenClawPluginDefinition = {
     // Register commands synchronously so OpenClaw sees them during the register() call.
     // These factories are plain functions (no top-level await) — marking them async
     // caused .then() callbacks to fire after register() returned, making OpenClaw miss them.
+    // Primary: /wallet (original name, lobster.cash removed by update script)
     api.registerCommand(createWalletCommand(api));
-    // Also register /wallet alias — ClawRouter loads before Crossmint/lobster in gateway mode,
-    // so we claim "wallet" first. If another plugin already holds it, registration is silently
-    // ignored and /blockrun still works.
+    // Alias: /blockrun (guaranteed unique fallback)
     try {
-      const walletAlias = createWalletCommand(api);
-      walletAlias.name = "wallet";
-      api.registerCommand(walletAlias);
+      const blockrunAlias = createWalletCommand(api);
+      blockrunAlias.name = "blockrun";
+      api.registerCommand(blockrunAlias);
     } catch {
-      // Silently ignored if "wallet" is already claimed
+      // Silently ignored if "blockrun" is already claimed
     }
     api.registerCommand(createStatsCommand());
     api.registerCommand(createExcludeCommand());
-    api.logger.info("Commands registered: /blockrun, /wallet, /stats, /exclude");
+    api.logger.info("Commands registered: /wallet, /blockrun, /stats, /exclude");
 
     // Register a service with stop() for cleanup on gateway shutdown
     // This prevents EADDRINUSE when the gateway restarts

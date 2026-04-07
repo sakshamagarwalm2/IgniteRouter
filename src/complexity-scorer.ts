@@ -51,7 +51,7 @@ function countMatches(text: string, patterns: RegExp[], maxCount: number): numbe
 }
 
 function scoreViaKeywords(prompt: string): number {
-  let score = 0.25;
+  let score = 0.15;
 
   const lower = prompt.toLowerCase();
 
@@ -77,8 +77,13 @@ function scoreViaKeywords(prompt: string): number {
     /big-o analysis/i,
     /infinite primes/i,
     /infinite set/i,
+    /postgresql/i,
+    /sqlalchemy/i,
+    /asyncio/i,
+    /scrape.*websites/i,
+    /database.*design/i,
   ];
-  score += countMatches(lower, expertSignals, 2) * 0.35;
+  score += countMatches(lower, expertSignals, 3) * 0.35;
 
   const complexSignals = [
     /step by step/i,
@@ -111,9 +116,6 @@ function scoreViaKeywords(prompt: string): number {
   const mediumSignals = [
     /explain/i,
     /explanation/i,
-    /summarise/i,
-    /summarize/i,
-    /summary/i,
     /describe/i,
     /description/i,
     /how (does|TCP|this|it)/i,
@@ -121,12 +123,10 @@ function scoreViaKeywords(prompt: string): number {
     /pros and cons/i,
     /recommend/i,
     /recommendation/i,
-    /write a/i,
-    /write an/i,
-    /create a/i,
-    /create an/i,
     /help me/i,
     /how .+ works/i,
+    /compare/i,
+    /analysis/i,
   ];
   score += countMatches(lower, mediumSignals, 3) * 0.1;
 
@@ -178,7 +178,10 @@ export async function scoreComplexity(prompt: string, timeoutMs = 2000): Promise
         const score = typeof data.score === "number" ? data.score : 0.5;
         const clampedScore = Math.max(0, Math.min(1, score));
 
-        routingLog.debug("RouteLLM score", { score: clampedScore, latencyMs: Date.now() - startTime });
+        routingLog.debug("RouteLLM score", {
+          score: clampedScore,
+          latencyMs: Date.now() - startTime,
+        });
 
         return {
           score: clampedScore,
@@ -202,12 +205,12 @@ export async function scoreComplexity(prompt: string, timeoutMs = 2000): Promise
     };
   })();
 
-  routingLog.debug("Complexity score", { 
-    score: result.score, 
-    tier: result.tier, 
-    method: result.method, 
-    latencyMs: result.latencyMs 
+  routingLog.debug("Complexity score", {
+    score: result.score,
+    tier: result.tier,
+    method: result.method,
+    latencyMs: result.latencyMs,
   });
-  
+
   return result;
 }

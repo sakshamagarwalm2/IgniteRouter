@@ -213,6 +213,18 @@ function mergeProvider(id: string, provided: Partial<UserProvider>): UserProvide
     priorityForTasks: {},
   };
 
+  // Convert string tier to enum if needed
+  let tierValue: ComplexityTier = ComplexityTier.Medium;
+  if (typeof provided.tier === "string") {
+    const tierStr = provided.tier.toUpperCase();
+    if (tierStr === "SIMPLE") tierValue = ComplexityTier.Simple;
+    else if (tierStr === "MEDIUM") tierValue = ComplexityTier.Medium;
+    else if (tierStr === "COMPLEX") tierValue = ComplexityTier.Complex;
+    else if (tierStr === "EXPERT") tierValue = ComplexityTier.Expert;
+  } else if (provided.tier) {
+    tierValue = provided.tier;
+  }
+
   if (id.startsWith("ollama/")) {
     return {
       ...baseDefaults,
@@ -222,16 +234,16 @@ function mergeProvider(id: string, provided: Partial<UserProvider>): UserProvide
       outputPricePerMToken: 0,
       avgLatencyMs: 500,
       ...provided,
-      tier: provided.tier ?? ComplexityTier.Medium,
+      tier: tierValue,
     };
   }
 
   const knownDefaults = KNOWN_MODELS.get(id);
   if (knownDefaults) {
-    configLog.debug("Provider metadata from registry", { 
-      id, 
-      contextWindow: knownDefaults.contextWindow, 
-      inputPrice: knownDefaults.inputPricePerMToken 
+    configLog.debug("Provider metadata from registry", {
+      id,
+      contextWindow: knownDefaults.contextWindow,
+      inputPrice: knownDefaults.inputPricePerMToken,
     });
   }
 
@@ -240,7 +252,14 @@ function mergeProvider(id: string, provided: Partial<UserProvider>): UserProvide
     ...(knownDefaults ?? {}),
     ...provided,
     id,
-    tier: provided.tier ?? ComplexityTier.Medium,
+    tier: tierValue,
+    // Ensure boolean flags default to true if not explicitly false
+    supportsStreaming: provided.supportsStreaming ?? (knownDefaults?.supportsStreaming ?? true),
+    supportsTools: provided.supportsTools ?? (knownDefaults?.supportsTools ?? true),
+    // Context window and prices also need safe fallbacks from registry
+    contextWindow: provided.contextWindow ?? (knownDefaults?.contextWindow ?? baseDefaults.contextWindow),
+    inputPricePerMToken: provided.inputPricePerMToken ?? (knownDefaults?.inputPricePerMToken ?? baseDefaults.inputPricePerMToken),
+    outputPricePerMToken: provided.outputPricePerMToken ?? (knownDefaults?.outputPricePerMToken ?? baseDefaults.outputPricePerMToken),
   };
 }
 
@@ -274,7 +293,10 @@ export function loadProviders(rawConfig: unknown): IgniteConfig {
         const merged = mergeProvider(prov.id, prov as Partial<UserProvider>);
         providers.push(merged);
       } catch (err) {
-        configLog.warn("Skipping invalid provider", { id: prov.id, reason: err instanceof Error ? err.message : String(err) });
+        configLog.warn("Skipping invalid provider", {
+          id: prov.id,
+          reason: err instanceof Error ? err.message : String(err),
+        });
       }
     }
   }

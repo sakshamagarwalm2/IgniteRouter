@@ -23,6 +23,7 @@ export function route(
 }
 
 export { getStrategy, registerStrategy } from "./strategy.js";
+export { classifyByRules } from "./rules.js";
 export {
   getFallbackChain,
   getFallbackChainFiltered,

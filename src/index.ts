@@ -23,6 +23,12 @@ import type {
 } from "./types.js";
 import { igniteProvider, setActiveProxy } from "./provider.js";
 import { startProxy, getProxyPort } from "./proxy.js";
+import {
+  loadProviders,
+  type IgniteConfig,
+  type ProviderPriority,
+  type UserProvider,
+} from "./user-providers.js";
 import type { RoutingConfig } from "./router/index.js";
 import {
   loadExcludeList,
@@ -60,6 +66,12 @@ import { fileURLToPath } from "node:url";
 import { VERSION } from "./version.js";
 import { getStats, formatStatsAscii, clearStats } from "./stats.js";
 import { buildPartnerTools, PARTNER_SERVICES } from "./partners/index.js";
+
+function writeDebug(msg: string) {
+  try {
+    writeFileSync("/tmp/ignite-debug.log", `${new Date().toISOString()} ${msg}\n`, { flag: "a" });
+  } catch {}
+}
 
 function installSkillsToWorkspace(logger: {
   info: (msg: string) => void;
@@ -127,7 +139,10 @@ function isCompletionMode(): boolean {
 
 function isGatewayMode(): boolean {
   const args = process.argv;
-  return args.includes("gateway");
+  const env = process.env;
+  return (
+    args.includes("gateway") || env.OPENCLAW_GATEWAY === "true" || env.OPENCLAW_MODE === "gateway"
+  );
 }
 
 function injectModelsConfig(logger: { info: (msg: string) => void }): void {
@@ -413,10 +428,50 @@ function injectAuthProfile(logger: { info: (msg: string) => void }): void {
 let activeProxyHandle: Awaited<ReturnType<typeof startProxy>> | null = null;
 
 async function startProxyInBackground(api: OpenClawPluginApi): Promise<void> {
-  const routingConfig = api.pluginConfig?.routing as Partial<RoutingConfig> | undefined;
+  const configJson = JSON.stringify(api.pluginConfig);
+  api.logger.info(`DEBUG: pluginConfig = ${configJson}`);
+
+  // OpenClaw plugin config can be flat or nested under plugin ID
+  const directConfig = api.pluginConfig as Record<string, any> | undefined;
+  const nestedConfig = (api.pluginConfig?.igniterouter as Record<string, any>)?.config || api.pluginConfig?.igniterouter;
+  
+  const finalConfig = nestedConfig || directConfig;
+
+  const routingConfig = finalConfig?.routing as Partial<RoutingConfig> | undefined;
+  let rawProviders = finalConfig?.providers as unknown[] | undefined;
+
+  api.logger.info(
+    `DEBUG: rawProviders = ${rawProviders ? JSON.stringify(rawProviders).substring(0, 100) + "..." : "undefined"}`,
+  );
+  
+  const igniteConfig: IgniteConfig | undefined =
+    rawProviders && rawProviders.length > 0
+      ? {
+          defaultPriority: (finalConfig?.defaultPriority || "cost") as ProviderPriority,
+          providers: rawProviders as unknown as UserProvider[],
+        }
+      : undefined;
+
+  if (activeProxyHandle && !igniteConfig?.providers?.length) {
+    api.logger.info("Proxy already running without new providers, reusing existing instance");
+    setActiveProxy(activeProxyHandle);
+    api.logger.info(`IgniteRouter ready — smart routing enabled`);
+    return;
+  }
+
+  if (activeProxyHandle) {
+    api.logger.info("Closing existing proxy to restart with new providers");
+    try {
+      await activeProxyHandle.close();
+    } catch (e) {
+      api.logger.warn(`Error closing proxy: ${e}`);
+    }
+    activeProxyHandle = null;
+  }
 
   const proxy = await startProxy({
     routingConfig,
+    igniteConfig,
     onReady: (port) => {
       api.logger.info(`IgniteRouter proxy listening on port ${port}`);
     },
@@ -573,6 +628,12 @@ const plugin: OpenClawPluginDefinition = {
   version: VERSION,
 
   register(api: OpenClawPluginApi) {
+    writeDebug(`register called: pluginConfig = ${JSON.stringify(api.pluginConfig)}`);
+    api.logger.info(
+      `=== DEBUG: pluginConfig keys = ${Object.keys(api.pluginConfig || {}).join(", ")}`,
+    );
+    api.logger.info(`=== DEBUG: full pluginConfig = ${JSON.stringify(api.pluginConfig)}`);
+
     const isDisabled =
       process["env"].IGNITEROUTER_DISABLED === "true" ||
       process["env"].IGNITEROUTER_DISABLED === "1";
@@ -698,6 +759,7 @@ const plugin: OpenClawPluginDefinition = {
       return;
     }
 
+    api.logger.info("Starting proxy in gateway mode...");
     startProxyInBackground(api)
       .then(async () => {
         const port = getProxyPort();
@@ -736,8 +798,10 @@ export {
   getFallbackChain,
   getFallbackChainFiltered,
   calculateModelCost,
+  classifyByRules,
 } from "./router/index.js";
 export type { RoutingDecision, RoutingConfig, Tier } from "./router/index.js";
+export { TaskType, classifyTask } from "./task-classifier.js";
 export { logUsage } from "./logger.js";
 export type { UsageEntry } from "./logger.js";
 export { RequestDeduplicator } from "./dedup.js";
@@ -757,4 +821,8 @@ export { ResponseCache } from "./response-cache.js";
 export type { CachedLLMResponse, ResponseCacheConfig } from "./response-cache.js";
 export { PARTNER_SERVICES, getPartnerService, buildPartnerTools } from "./partners/index.js";
 export type { PartnerServiceDefinition, PartnerToolDefinition } from "./partners/index.js";
-
+export {
+  buildUpstreamRequest,
+  getProviderBaseUrl,
+  getProviderAuthHeaders,
+} from "./provider-url-builder.js";

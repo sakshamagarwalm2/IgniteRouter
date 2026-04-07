@@ -22,6 +22,9 @@ export function getProviderBaseUrl(provider: UserProvider): string {
   if (id.startsWith("deepseek/")) return "https://api.deepseek.com/v1";
   if (id.startsWith("openrouter/")) return "https://openrouter.ai/api/v1";
   if (id.startsWith("ollama/")) return "http://localhost:11434";
+  if (id.startsWith("mistral/")) return "https://api.mistral.ai/v1";
+  if (id.startsWith("mistral-large-latest")) return "https://api.mistral.ai/v1";
+  if (id.startsWith("mimo-") || id.startsWith("xiaomi/")) return "https://api.xiaomimimo.com/v1";
 
   return "";
 }
@@ -55,7 +58,7 @@ interface OpenAiMessage {
 
 export function buildUpstreamRequest(
   provider: UserProvider,
-  openAiBody: Record<string, any>
+  openAiBody: Record<string, any>,
 ): UpstreamRequest {
   const id = provider.id.toLowerCase();
   const baseUrl = getProviderBaseUrl(provider);
@@ -64,24 +67,34 @@ export function buildUpstreamRequest(
   let body: any = { ...openAiBody };
 
   // Strip prefix for known providers
-  if (id.startsWith("openai/") || id.startsWith("anthropic/") || id.startsWith("google/") || 
-      id.startsWith("deepseek/") || id.startsWith("openrouter/") || id.startsWith("ollama/")) {
+  if (
+    id.startsWith("openai/") ||
+    id.startsWith("anthropic/") ||
+    id.startsWith("google/") ||
+    id.startsWith("deepseek/") ||
+    id.startsWith("openrouter/") ||
+    id.startsWith("ollama/") ||
+    id.startsWith("mistral/") ||
+    id.startsWith("mistral-large-latest") ||
+    id.startsWith("mimo-") ||
+    id.startsWith("xiaomi/")
+  ) {
     body.model = stripProviderPrefix(provider.id);
   }
 
   if (id.startsWith("anthropic/")) {
     url = `${baseUrl}/messages`;
-    
+
     // Transform OpenAI to Anthropic
     const messages: OpenAiMessage[] = openAiBody.messages || [];
-    const systemMessage = messages.find(m => m.role === "system");
-    const otherMessages = messages.filter(m => m.role !== "system");
+    const systemMessage = messages.find((m) => m.role === "system");
+    const otherMessages = messages.filter((m) => m.role !== "system");
 
-    const anthropicMessages = otherMessages.map(m => {
+    const anthropicMessages = otherMessages.map((m) => {
       let role = m.role === "assistant" ? "assistant" : "user";
       return {
         role,
-        content: m.content
+        content: m.content,
       };
     });
 
@@ -93,23 +106,25 @@ export function buildUpstreamRequest(
       stream: openAiBody.stream,
       temperature: openAiBody.temperature,
       tools: openAiBody.tools,
-      tool_choice: openAiBody.tool_choice
+      tool_choice: openAiBody.tool_choice,
     };
   } else if (id.startsWith("google/")) {
     const model = stripProviderPrefix(provider.id);
     url = `${baseUrl}/models/${model}:generateContent?key=${provider.apiKey}`;
-    
+
     // Simplistic Google transform (can be improved)
     // For now, let's keep it basic as requested
     body = {
-      contents: (openAiBody.messages || []).filter((m: any) => m.role !== "system").map((m: any) => ({
-        role: m.role === "assistant" ? "model" : "user",
-        parts: [{ text: typeof m.content === "string" ? m.content : JSON.stringify(m.content) }]
-      }))
+      contents: (openAiBody.messages || [])
+        .filter((m: any) => m.role !== "system")
+        .map((m: any) => ({
+          role: m.role === "assistant" ? "model" : "user",
+          parts: [{ text: typeof m.content === "string" ? m.content : JSON.stringify(m.content) }],
+        })),
     };
     if (openAiBody.messages?.find((m: any) => m.role === "system")) {
       body.system_instruction = {
-        parts: [{ text: openAiBody.messages.find((m: any) => m.role === "system").content }]
+        parts: [{ text: openAiBody.messages.find((m: any) => m.role === "system").content }],
       };
     }
   } else if (id.startsWith("ollama/")) {

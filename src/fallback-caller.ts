@@ -38,8 +38,9 @@ export function classifyHttpError(status: number, body?: string): FailureReason 
   if (status === 429) return "rate-limit";
   if (status === 500 || status === 502 || status === 503 || status === 504) return "server-error";
   if (status === 402) return "quota-exceeded";
+  if (status === 422) return "bad-request"; // Validation error - don't retry
   if (status === 403) {
-    if (body && (body.includes("quota") || body.includes("limit"))) {
+    if (body && typeof body === "string" && (body.includes("quota") || body.includes("limit"))) {
       return "quota-exceeded";
     }
     return "auth-error";
@@ -66,31 +67,48 @@ export async function callWithFallback(
 
     try {
       const { url, init } = buildRequest(candidate.provider);
-      fallbackLog.debug("Trying provider", { model: candidate.provider.id, attempt: attemptNumber });
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-      const response = await fetch(url, {
-        ...init,
-        signal: controller.signal,
+      fallbackLog.debug("Trying provider", {
+        model: candidate.provider.id,
+        attempt: attemptNumber,
       });
 
-      clearTimeout(timeout);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+      let response: Response;
+      try {
+        fallbackLog.info(`Fetching ${url} with model ${candidate.provider.id}`);
+        fallbackLog.debug(`Request init: ${JSON.stringify({ ...init, body: undefined })}`);
+        response = await fetch(url, {
+          ...init,
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+      } catch (fetchErr: unknown) {
+        clearTimeout(timeoutId);
+        const errMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+        const isTimeout =
+          errMsg.toLowerCase().includes("abort") || errMsg.toLowerCase().includes("timeout");
+
+        fallbackLog.error("Fetch failed", {
+          error: errMsg,
+          url,
+          isTimeout,
+          model: candidate.provider.id,
+        });
+        attempts.push({
+          provider: candidate.provider,
+          success: false,
+          failureReason: isTimeout ? "timeout" : "unknown",
+          errorMessage: errMsg,
+          latencyMs: Date.now() - startTime,
+        });
+        continue;
+      }
+
       const latencyMs = Date.now() - startTime;
 
       if (response.ok) {
-        const text = await response.text();
-        if (!text || text.trim() === "") {
-          attempts.push({
-            provider: candidate.provider,
-            success: false,
-            failureReason: "empty-response",
-            statusCode: response.status,
-            latencyMs,
-          });
-          continue;
-        }
-
         attempts.push({
           provider: candidate.provider,
           success: true,
@@ -103,21 +121,25 @@ export async function callWithFallback(
         return {
           success: true,
           attempts,
-          finalResponse: new Response(text, { status: response.status, headers: response.headers }),
+          finalResponse: response,
           usedProvider: candidate.provider,
         };
       }
 
       const body = await response.text().catch(() => "");
       const reason = classifyHttpError(response.status, body);
-      fallbackLog.warn("Provider failed", { 
-        model: candidate.provider.id, 
-        reason, 
+
+      // Log the raw response for debugging
+      fallbackLog.warn("Provider failed", {
+        model: candidate.provider.id,
+        reason,
         status: response.status,
-        latencyMs 
+        body: body.substring(0, 500),
+        latencyMs,
       });
 
-      if (reason === "bad-request") {
+      // Don't retry on bad-request (validation errors)
+      if (reason === "bad-request" && retryableOnly) {
         attempts.push({
           provider: candidate.provider,
           success: false,
@@ -134,6 +156,46 @@ export async function callWithFallback(
         };
       }
 
+      // Auth errors and quota errors - try next provider
+      if (reason === "auth-error" || reason === "quota-exceeded") {
+        fallbackLog.info("Trying next provider after failure", {
+          reason,
+          model: candidate.provider.id,
+        });
+        attempts.push({
+          provider: candidate.provider,
+          success: false,
+          failureReason: reason,
+          statusCode: response.status,
+          errorMessage: body || undefined,
+          latencyMs,
+        });
+        // Continue to next provider - don't break out of the loop
+        continue;
+      }
+
+      // Server errors and timeouts - can retry
+      if (reason === "server-error" || reason === "rate-limit" || reason === "timeout") {
+        fallbackLog.info("Server error/rate-limit, trying next provider", {
+          reason,
+          model: candidate.provider.id,
+        });
+        attempts.push({
+          provider: candidate.provider,
+          success: false,
+          failureReason: reason,
+          statusCode: response.status,
+          errorMessage: body || undefined,
+          latencyMs,
+        });
+        continue;
+      }
+
+      // Unknown errors - try next provider
+      fallbackLog.info("Unknown error, trying next provider", {
+        reason,
+        model: candidate.provider.id,
+      });
       attempts.push({
         provider: candidate.provider,
         success: false,
@@ -142,24 +204,25 @@ export async function callWithFallback(
         errorMessage: body || undefined,
         latencyMs,
       });
-
-      if (reason === "auth-error") {
-        continue;
-      }
+      continue;
     } catch (err) {
       const latencyMs = Date.now() - startTime;
       const error = err as Error;
 
       let reason: FailureReason = "unknown";
-      if (error.name === "AbortError" || error.message.toLowerCase().includes("aborted") || error.message.toLowerCase().includes("timeout")) {
+      if (
+        error.name === "AbortError" ||
+        error.message.toLowerCase().includes("aborted") ||
+        error.message.toLowerCase().includes("timeout")
+      ) {
         reason = "timeout";
       }
 
-      fallbackLog.warn("Provider failed", { 
-        model: candidate.provider.id, 
-        reason, 
+      fallbackLog.warn("Provider failed", {
+        model: candidate.provider.id,
+        reason,
         errorMessage: error.message,
-        latencyMs 
+        latencyMs,
       });
 
       attempts.push({

@@ -174,6 +174,18 @@ declare function getFallbackChainFiltered(tier: Tier, tierConfigs: Record<Tier, 
  * Scoring uses weighted float dimensions with sigmoid confidence calibration.
  */
 type Tier = "SIMPLE" | "MEDIUM" | "COMPLEX" | "REASONING";
+type ScoringResult = {
+    score: number;
+    tier: Tier | null;
+    confidence: number;
+    signals: string[];
+    agenticScore?: number;
+    dimensions?: Array<{
+        name: string;
+        score: number;
+        signal: string | null;
+    }>;
+};
 type RoutingDecision = {
     model: string;
     tier: Tier;
@@ -278,6 +290,18 @@ type RoutingConfig = {
 };
 
 /**
+ * Rule-Based Classifier (v2 — Weighted Scoring)
+ *
+ * Scores a request across 14 weighted dimensions and maps the aggregate
+ * score to a tier using configurable boundaries. Confidence is calibrated
+ * via sigmoid — low confidence triggers the fallback classifier.
+ *
+ * Handles 70-80% of requests in < 1ms with zero cost.
+ */
+
+declare function classifyByRules(prompt: string, systemPrompt: string | undefined, estimatedTokens: number, config: ScoringConfig): ScoringResult;
+
+/**
  * Default Routing Config
  *
  * All routing parameters as a TypeScript constant.
@@ -309,6 +333,15 @@ declare enum TaskType {
     Vision = "vision",
     Deep = "deep"
 }
+interface ClassificationResult {
+    taskType: TaskType;
+    confidence: "high" | "signal" | "keyword" | "default";
+    reason: string;
+}
+declare function classifyTask(messages: Array<{
+    role: string;
+    content: unknown;
+}>, tools?: unknown[], estimatedTokens?: number): ClassificationResult;
 
 declare enum ComplexityTier {
     Simple = "SIMPLE",
@@ -884,6 +917,15 @@ type PartnerToolDefinition = {
  */
 declare function buildPartnerTools(proxyBaseUrl: string): PartnerToolDefinition[];
 
+interface UpstreamRequest {
+    url: string;
+    headers: Record<string, string>;
+    body: unknown;
+}
+declare function getProviderBaseUrl(provider: UserProvider): string;
+declare function getProviderAuthHeaders(provider: UserProvider): Record<string, string>;
+declare function buildUpstreamRequest(provider: UserProvider, openAiBody: Record<string, any>): UpstreamRequest;
+
 /**
  * @igniterouter/igniterouter
  *
@@ -903,4 +945,4 @@ declare function buildPartnerTools(proxyBaseUrl: string): PartnerToolDefinition[
 
 declare const plugin: OpenClawPluginDefinition;
 
-export { type AggregatedStats, type CachedLLMResponse, type CachedResponse, DEFAULT_RETRY_CONFIG, DEFAULT_ROUTING_CONFIG, DEFAULT_SESSION_CONFIG, type DailyStats, IgniteRouter_MODELS, MODEL_ALIASES, OPENCLAW_MODELS, PARTNER_SERVICES, type PartnerServiceDefinition, type PartnerToolDefinition, type ProxyHandle, type ProxyOptions, RequestDeduplicator, ResponseCache, type ResponseCacheConfig, type RetryConfig, type RoutingConfig, type RoutingDecision, type SessionConfig, type SessionEntry, SessionStore, type Tier, type UsageEntry, buildPartnerTools, buildProviderModels, calculateModelCost, clearStats, plugin as default, fetchWithRetry, formatStatsAscii, getAgenticModels, getFallbackChain, getFallbackChainFiltered, getModelContextWindow, getPartnerService, getProxyPort, getSessionId, getStats, hashRequestContent, igniteProvider, isAgenticModel, isRetryable, loadProviders, logUsage, resolveModelAlias, route, startProxy };
+export { type AggregatedStats, type CachedLLMResponse, type CachedResponse, DEFAULT_RETRY_CONFIG, DEFAULT_ROUTING_CONFIG, DEFAULT_SESSION_CONFIG, type DailyStats, IgniteRouter_MODELS, MODEL_ALIASES, OPENCLAW_MODELS, PARTNER_SERVICES, type PartnerServiceDefinition, type PartnerToolDefinition, type ProxyHandle, type ProxyOptions, RequestDeduplicator, ResponseCache, type ResponseCacheConfig, type RetryConfig, type RoutingConfig, type RoutingDecision, type SessionConfig, type SessionEntry, SessionStore, TaskType, type Tier, type UsageEntry, buildPartnerTools, buildProviderModels, buildUpstreamRequest, calculateModelCost, classifyByRules, classifyTask, clearStats, plugin as default, fetchWithRetry, formatStatsAscii, getAgenticModels, getFallbackChain, getFallbackChainFiltered, getModelContextWindow, getPartnerService, getProviderAuthHeaders, getProviderBaseUrl, getProxyPort, getSessionId, getStats, hashRequestContent, igniteProvider, isAgenticModel, isRetryable, loadProviders, logUsage, resolveModelAlias, route, startProxy };

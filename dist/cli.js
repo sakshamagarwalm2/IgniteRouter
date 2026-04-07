@@ -18445,7 +18445,7 @@ var require_response = __commonJS({
     var assert = __require("assert");
     var { isomorphicEncode, serializeJavascriptValueToJSONString } = require_infra();
     var textEncoder = new TextEncoder("utf-8");
-    var Response2 = class _Response {
+    var Response = class _Response {
       /** @type {Headers} */
       #headers;
       #state;
@@ -18617,13 +18617,13 @@ var require_response = __commonJS({
         response.#state = newState;
       }
     };
-    var { getResponseHeaders, setResponseHeaders, getResponseState, setResponseState } = Response2;
-    Reflect.deleteProperty(Response2, "getResponseHeaders");
-    Reflect.deleteProperty(Response2, "setResponseHeaders");
-    Reflect.deleteProperty(Response2, "getResponseState");
-    Reflect.deleteProperty(Response2, "setResponseState");
-    mixinBody(Response2, getResponseState);
-    Object.defineProperties(Response2.prototype, {
+    var { getResponseHeaders, setResponseHeaders, getResponseState, setResponseState } = Response;
+    Reflect.deleteProperty(Response, "getResponseHeaders");
+    Reflect.deleteProperty(Response, "setResponseHeaders");
+    Reflect.deleteProperty(Response, "getResponseState");
+    Reflect.deleteProperty(Response, "setResponseState");
+    mixinBody(Response, getResponseState);
+    Object.defineProperties(Response.prototype, {
       type: kEnumerableProperty,
       url: kEnumerableProperty,
       status: kEnumerableProperty,
@@ -18639,7 +18639,7 @@ var require_response = __commonJS({
         configurable: true
       }
     });
-    Object.defineProperties(Response2, {
+    Object.defineProperties(Response, {
       json: kEnumerableProperty,
       redirect: kEnumerableProperty,
       error: kEnumerableProperty
@@ -18772,7 +18772,7 @@ var require_response = __commonJS({
       }
     }
     function fromInnerResponse(innerResponse, guard) {
-      const response = new Response2(kConstruct);
+      const response = new Response(kConstruct);
       setResponseState(response, innerResponse);
       const headers = new Headers(kConstruct);
       setResponseHeaders(response, headers);
@@ -18826,14 +18826,14 @@ var require_response = __commonJS({
         converter: webidl.converters.HeadersInit
       }
     ]);
-    webidl.is.Response = webidl.util.MakeTypeAssertion(Response2);
+    webidl.is.Response = webidl.util.MakeTypeAssertion(Response);
     module.exports = {
       isNetworkError,
       makeNetworkError,
       makeResponse,
       makeAppropriateNetworkError,
       filterResponse,
-      Response: Response2,
+      Response,
       cloneResponse,
       fromInnerResponse,
       getResponseState
@@ -26977,7 +26977,7 @@ function countMatches(text, patterns, maxCount) {
   return count;
 }
 function scoreViaKeywords(prompt) {
-  let score = 0.25;
+  let score = 0.15;
   const lower = prompt.toLowerCase();
   const expertSignals = [
     /prove/i,
@@ -27000,9 +27000,14 @@ function scoreViaKeywords(prompt) {
     /big o analysis/i,
     /big-o analysis/i,
     /infinite primes/i,
-    /infinite set/i
+    /infinite set/i,
+    /postgresql/i,
+    /sqlalchemy/i,
+    /asyncio/i,
+    /scrape.*websites/i,
+    /database.*design/i
   ];
-  score += countMatches(lower, expertSignals, 2) * 0.35;
+  score += countMatches(lower, expertSignals, 3) * 0.35;
   const complexSignals = [
     /step by step/i,
     /explain in detail/i,
@@ -27033,9 +27038,6 @@ function scoreViaKeywords(prompt) {
   const mediumSignals = [
     /explain/i,
     /explanation/i,
-    /summarise/i,
-    /summarize/i,
-    /summary/i,
     /describe/i,
     /description/i,
     /how (does|TCP|this|it)/i,
@@ -27043,12 +27045,10 @@ function scoreViaKeywords(prompt) {
     /pros and cons/i,
     /recommend/i,
     /recommendation/i,
-    /write a/i,
-    /write an/i,
-    /create a/i,
-    /create an/i,
     /help me/i,
-    /how .+ works/i
+    /how .+ works/i,
+    /compare/i,
+    /analysis/i
   ];
   score += countMatches(lower, mediumSignals, 3) * 0.1;
   const simpleSignals = [
@@ -27089,7 +27089,10 @@ async function scoreComplexity(prompt, timeoutMs = 2e3) {
         const data = await response.json();
         const score = typeof data.score === "number" ? data.score : 0.5;
         const clampedScore = Math.max(0, Math.min(1, score));
-        routingLog.debug("RouteLLM score", { score: clampedScore, latencyMs: Date.now() - startTime });
+        routingLog.debug("RouteLLM score", {
+          score: clampedScore,
+          latencyMs: Date.now() - startTime
+        });
         return {
           score: clampedScore,
           tier: scoreToTier(clampedScore),
@@ -27266,12 +27269,9 @@ function computeBaseScore(requested, actual) {
   const actualIndex = TIER_ORDER.indexOf(actual);
   const distance = Math.abs(actualIndex - requestedIndex);
   if (distance === 0) return 100;
-  if (actualIndex < requestedIndex) {
-    return 60;
-  }
-  if (distance === 1) {
-    return 40;
-  }
+  if (actualIndex === requestedIndex + 1) return 85;
+  if (actualIndex === requestedIndex - 1) return 50;
+  if (actualIndex > requestedIndex) return 30;
   return 10;
 }
 function selectCandidates(providers, tier, taskType, priority, requestContext) {
@@ -27309,57 +27309,55 @@ function selectCandidates(providers, tier, taskType, priority, requestContext) {
     const baseScore = computeBaseScore(tier, provider.tier);
     score += baseScore;
     if (baseScore === 100) scoreReasons.push("exact tier match");
-    else if (baseScore === 60) scoreReasons.push("one tier above");
-    else if (baseScore === 40) scoreReasons.push("one tier below");
-    else scoreReasons.push("tier distance >1");
+    else if (baseScore === 85) scoreReasons.push("one tier above");
+    else if (baseScore === 50) scoreReasons.push("one tier below");
+    else if (baseScore === 30) scoreReasons.push("multiple tiers above");
+    else scoreReasons.push("multiple tiers below");
     if (priority === "cost") {
       if (provider.inputPricePerMToken === 0) {
-        score += 30;
-        scoreReasons.push("free/local model");
+        score += 10;
+        scoreReasons.push("free model");
       } else if (provider.inputPricePerMToken < 0.5) {
-        score += 20;
+        score += 5;
         scoreReasons.push("low cost");
       } else if (provider.inputPricePerMToken < 2) {
-        score += 10;
+        score += 2;
         scoreReasons.push("moderate cost");
       }
       if (provider.inputPricePerMToken >= 5) {
-        score -= 20;
+        score -= 10;
         scoreReasons.push("expensive");
       }
     } else if (priority === "speed") {
       if (provider.avgLatencyMs < 400) {
-        score += 30;
+        score += 10;
         scoreReasons.push("very fast");
       } else if (provider.avgLatencyMs < 800) {
-        score += 15;
+        score += 5;
         scoreReasons.push("fast");
       }
       if (provider.avgLatencyMs > 1500) {
-        score -= 20;
+        score -= 10;
         scoreReasons.push("slow");
       }
     } else if (priority === "quality") {
       if (provider.tier === "EXPERT" /* Expert */) {
-        score += 25;
+        score += 10;
         scoreReasons.push("expert tier for quality");
       } else if (provider.tier === "COMPLEX" /* Complex */) {
-        score += 15;
-        scoreReasons.push("complex tier for quality");
-      } else if (provider.tier === "MEDIUM" /* Medium */) {
         score += 5;
-        scoreReasons.push("medium tier for quality");
+        scoreReasons.push("complex tier for quality");
       }
     }
-    if (provider.specialisedFor.includes(taskType)) {
+    if ((provider.specialisedFor ?? []).includes(taskType)) {
       score += 25;
       scoreReasons.push(`specialised for ${taskType}`);
     }
-    if (provider.avoidFor.includes(taskType)) {
+    if ((provider.avoidFor ?? []).includes(taskType)) {
       score -= 20;
       scoreReasons.push(`should avoid for ${taskType}`);
     }
-    const explicitRank = provider.priorityForTasks[taskType];
+    const explicitRank = taskType ? (provider.priorityForTasks ?? {})[taskType] : void 0;
     if (explicitRank !== void 0) {
       score = 1e3 - explicitRank;
       scoreReasons.push(`explicit rank ${explicitRank}`);
@@ -27497,8 +27495,9 @@ function classifyHttpError(status, body) {
   if (status === 429) return "rate-limit";
   if (status === 500 || status === 502 || status === 503 || status === 504) return "server-error";
   if (status === 402) return "quota-exceeded";
+  if (status === 422) return "bad-request";
   if (status === 403) {
-    if (body && (body.includes("quota") || body.includes("limit"))) {
+    if (body && typeof body === "string" && (body.includes("quota") || body.includes("limit"))) {
       return "quota-exceeded";
     }
     return "auth-error";
@@ -27517,27 +27516,42 @@ async function callWithFallback(candidates, buildRequest, options) {
     const startTime = Date.now();
     try {
       const { url, init } = buildRequest(candidate.provider);
-      fallbackLog.debug("Trying provider", { model: candidate.provider.id, attempt: attemptNumber });
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), timeoutMs);
-      const response = await fetch(url, {
-        ...init,
-        signal: controller.signal
+      fallbackLog.debug("Trying provider", {
+        model: candidate.provider.id,
+        attempt: attemptNumber
       });
-      clearTimeout(timeout);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      let response;
+      try {
+        fallbackLog.info(`Fetching ${url} with model ${candidate.provider.id}`);
+        fallbackLog.debug(`Request init: ${JSON.stringify({ ...init, body: void 0 })}`);
+        response = await fetch(url, {
+          ...init,
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+      } catch (fetchErr) {
+        clearTimeout(timeoutId);
+        const errMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+        const isTimeout = errMsg.toLowerCase().includes("abort") || errMsg.toLowerCase().includes("timeout");
+        fallbackLog.error("Fetch failed", {
+          error: errMsg,
+          url,
+          isTimeout,
+          model: candidate.provider.id
+        });
+        attempts.push({
+          provider: candidate.provider,
+          success: false,
+          failureReason: isTimeout ? "timeout" : "unknown",
+          errorMessage: errMsg,
+          latencyMs: Date.now() - startTime
+        });
+        continue;
+      }
       const latencyMs = Date.now() - startTime;
       if (response.ok) {
-        const text = await response.text();
-        if (!text || text.trim() === "") {
-          attempts.push({
-            provider: candidate.provider,
-            success: false,
-            failureReason: "empty-response",
-            statusCode: response.status,
-            latencyMs
-          });
-          continue;
-        }
         attempts.push({
           provider: candidate.provider,
           success: true,
@@ -27548,7 +27562,7 @@ async function callWithFallback(candidates, buildRequest, options) {
         return {
           success: true,
           attempts,
-          finalResponse: new Response(text, { status: response.status, headers: response.headers }),
+          finalResponse: response,
           usedProvider: candidate.provider
         };
       }
@@ -27558,9 +27572,10 @@ async function callWithFallback(candidates, buildRequest, options) {
         model: candidate.provider.id,
         reason,
         status: response.status,
+        body: body.substring(0, 500),
         latencyMs
       });
-      if (reason === "bad-request") {
+      if (reason === "bad-request" && retryableOnly) {
         attempts.push({
           provider: candidate.provider,
           success: false,
@@ -27575,6 +27590,40 @@ async function callWithFallback(candidates, buildRequest, options) {
           errorSummary: buildErrorSummary(attempts)
         };
       }
+      if (reason === "auth-error" || reason === "quota-exceeded") {
+        fallbackLog.info("Trying next provider after failure", {
+          reason,
+          model: candidate.provider.id
+        });
+        attempts.push({
+          provider: candidate.provider,
+          success: false,
+          failureReason: reason,
+          statusCode: response.status,
+          errorMessage: body || void 0,
+          latencyMs
+        });
+        continue;
+      }
+      if (reason === "server-error" || reason === "rate-limit" || reason === "timeout") {
+        fallbackLog.info("Server error/rate-limit, trying next provider", {
+          reason,
+          model: candidate.provider.id
+        });
+        attempts.push({
+          provider: candidate.provider,
+          success: false,
+          failureReason: reason,
+          statusCode: response.status,
+          errorMessage: body || void 0,
+          latencyMs
+        });
+        continue;
+      }
+      fallbackLog.info("Unknown error, trying next provider", {
+        reason,
+        model: candidate.provider.id
+      });
       attempts.push({
         provider: candidate.provider,
         success: false,
@@ -27583,9 +27632,7 @@ async function callWithFallback(candidates, buildRequest, options) {
         errorMessage: body || void 0,
         latencyMs
       });
-      if (reason === "auth-error") {
-        continue;
-      }
+      continue;
     } catch (err) {
       const latencyMs = Date.now() - startTime;
       const error = err;
@@ -30273,6 +30320,9 @@ function getProviderBaseUrl(provider) {
   if (id.startsWith("deepseek/")) return "https://api.deepseek.com/v1";
   if (id.startsWith("openrouter/")) return "https://openrouter.ai/api/v1";
   if (id.startsWith("ollama/")) return "http://localhost:11434";
+  if (id.startsWith("mistral/")) return "https://api.mistral.ai/v1";
+  if (id.startsWith("mistral-large-latest")) return "https://api.mistral.ai/v1";
+  if (id.startsWith("mimo-") || id.startsWith("xiaomi/")) return "https://api.xiaomimimo.com/v1";
   return "";
 }
 function getProviderAuthHeaders(provider) {
@@ -30295,7 +30345,7 @@ function buildUpstreamRequest(provider, openAiBody) {
   const headers = getProviderAuthHeaders(provider);
   let url = `${baseUrl}/chat/completions`;
   let body = { ...openAiBody };
-  if (id.startsWith("openai/") || id.startsWith("anthropic/") || id.startsWith("google/") || id.startsWith("deepseek/") || id.startsWith("openrouter/") || id.startsWith("ollama/")) {
+  if (id.startsWith("openai/") || id.startsWith("anthropic/") || id.startsWith("google/") || id.startsWith("deepseek/") || id.startsWith("openrouter/") || id.startsWith("ollama/") || id.startsWith("mistral/") || id.startsWith("mistral-large-latest") || id.startsWith("mimo-") || id.startsWith("xiaomi/")) {
     body.model = stripProviderPrefix(provider.id);
   }
   if (id.startsWith("anthropic/")) {
@@ -30631,8 +30681,8 @@ async function checkExistingProxy(port) {
     clearTimeout(timeoutId);
     if (response.ok) {
       const data = await response.json();
-      if (data.status === "ok" && data.wallet) {
-        return { wallet: data.wallet, paymentChain: data.paymentChain };
+      if (data.status === "ok") {
+        return { wallet: data.wallet ?? "", paymentChain: data.paymentChain };
       }
     }
     return void 0;
@@ -31175,7 +31225,8 @@ async function startProxy(options) {
         plugin: "igniterouter",
         version: VERSION,
         providers: igniteCfg.providers.length,
-        defaultPriority: igniteCfg.defaultPriority
+        defaultPriority: igniteCfg.defaultPriority,
+        wallet: ""
       };
       if (upstreamProxy) {
         response.upstreamProxy = upstreamProxy;
@@ -31666,31 +31717,29 @@ async function startProxy(options) {
     })
   };
 }
+function normalizeRequestForModel(parsed, modelId) {
+  const messages = parsed.messages;
+  if (!Array.isArray(messages)) return parsed;
+  parsed.messages = normalizeMessageRoles(messages);
+  parsed.messages = debrandSystemMessages(parsed.messages, modelId);
+  const truncationResult = truncateMessages(parsed.messages);
+  parsed.messages = truncationResult.messages;
+  parsed.messages = sanitizeToolIds(parsed.messages);
+  if (isGoogleModel(modelId)) {
+    parsed.messages = normalizeMessagesForGoogle(parsed.messages);
+  }
+  const hasThinkingEnabled = !!(parsed.thinking || parsed.extended_thinking || isReasoningModel(modelId));
+  if (hasThinkingEnabled) {
+    parsed.messages = normalizeMessagesForThinking(parsed.messages);
+  }
+  return parsed;
+}
 async function tryModelRequest(upstreamUrl, method, headers, body, modelId, maxTokens, signal) {
   let requestBody = body;
   try {
-    const parsed = JSON.parse(body.toString());
+    let parsed = JSON.parse(body.toString());
     parsed.model = toUpstreamModelId(modelId);
-    if (Array.isArray(parsed.messages)) {
-      parsed.messages = normalizeMessageRoles(parsed.messages);
-    }
-    if (Array.isArray(parsed.messages)) {
-      parsed.messages = debrandSystemMessages(parsed.messages, modelId);
-    }
-    if (Array.isArray(parsed.messages)) {
-      const truncationResult = truncateMessages(parsed.messages);
-      parsed.messages = truncationResult.messages;
-    }
-    if (Array.isArray(parsed.messages)) {
-      parsed.messages = sanitizeToolIds(parsed.messages);
-    }
-    if (isGoogleModel(modelId) && Array.isArray(parsed.messages)) {
-      parsed.messages = normalizeMessagesForGoogle(parsed.messages);
-    }
-    const hasThinkingEnabled = !!(parsed.thinking || parsed.extended_thinking || isReasoningModel(modelId));
-    if (hasThinkingEnabled && Array.isArray(parsed.messages)) {
-      parsed.messages = normalizeMessagesForThinking(parsed.messages);
-    }
+    parsed = normalizeRequestForModel(parsed, modelId);
     requestBody = Buffer.from(JSON.stringify(parsed));
   } catch {
   }
@@ -31735,10 +31784,11 @@ async function tryModelRequest(upstreamUrl, method, headers, body, modelId, maxT
     }
     return { success: true, response };
   } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
+    const error = err;
+    proxyLog.error(`fetch failed: ${error.message} (${error.name})`, { url: upstreamUrl });
     return {
       success: false,
-      errorBody: errorMsg,
+      errorBody: error.message,
       errorStatus: 500,
       isProviderError: true
       // Network errors are retryable
@@ -31747,6 +31797,7 @@ async function tryModelRequest(upstreamUrl, method, headers, body, modelId, maxT
 }
 async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator, sessionStore, responseCache, sessionJournal) {
   const startTime = Date.now();
+  proxyLog.info(`Request: ${req.method} ${req.url}`);
   const upstreamUrl = `${apiBase}${req.url}`;
   const bodyChunks = [];
   for await (const chunk of req) {
@@ -31817,7 +31868,12 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
             responseText = "Model reset to automatic routing.";
           } else if (sub === "list") {
             const igniteCfg2 = options.igniteConfig ?? { defaultPriority: "cost", providers: [] };
-            const tiers = { SIMPLE: [], MEDIUM: [], COMPLEX: [], REASONING: [] };
+            const tiers = {
+              SIMPLE: [],
+              MEDIUM: [],
+              COMPLEX: [],
+              REASONING: []
+            };
             for (const p of igniteCfg2.providers) {
               const tier = p.tier || "MEDIUM";
               const cost = (p.inputPricePerMToken + p.outputPricePerMToken) / 2;
@@ -31869,17 +31925,31 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
             object: "chat.completion",
             created: timestamp,
             model: "igniterouter/command",
-            choices: [{ index: 0, message: { role: "assistant", content: responseText }, finish_reason: "stop" }],
+            choices: [
+              {
+                index: 0,
+                message: { role: "assistant", content: responseText },
+                finish_reason: "stop"
+              }
+            ],
             usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
           };
           if (isStreaming) {
-            res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
-            res.write(`data: ${JSON.stringify({ ...syntheticResponse, object: "chat.completion.chunk", choices: [{ index: 0, delta: { role: "assistant", content: responseText }, finish_reason: null }] })}
+            res.writeHead(200, {
+              "Content-Type": "text/event-stream",
+              "Cache-Control": "no-cache",
+              Connection: "keep-alive"
+            });
+            res.write(
+              `data: ${JSON.stringify({ ...syntheticResponse, object: "chat.completion.chunk", choices: [{ index: 0, delta: { role: "assistant", content: responseText }, finish_reason: null }] })}
 
-`);
-            res.write(`data: ${JSON.stringify({ ...syntheticResponse, object: "chat.completion.chunk", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}
+`
+            );
+            res.write(
+              `data: ${JSON.stringify({ ...syntheticResponse, object: "chat.completion.chunk", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}
 
-`);
+`
+            );
             res.write("data: [DONE]\n\n");
             res.end();
           } else {
@@ -31889,7 +31959,9 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
           return;
         }
       }
-      const igniteCfg = { ...options.igniteConfig ?? { defaultPriority: "cost", providers: [] } };
+      const igniteCfg = {
+        ...options.igniteConfig ?? { defaultPriority: "cost", providers: [] }
+      };
       if (effectiveSessionId) {
         const sess = sessionStore.getSession(effectiveSessionId);
         if (sess?.priority) {
@@ -31897,8 +31969,14 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
         }
       }
       const useIgniteRouting = igniteCfg.providers && igniteCfg.providers.length > 0;
+      proxyLog.info("Routing decision", {
+        useIgniteRouting,
+        providersCount: igniteCfg.providers?.length ?? 0
+      });
       if (useIgniteRouting) {
-        proxyLog.info("Using IgniteRouter routing engine", { providers: igniteCfg.providers.length });
+        proxyLog.info("Using IgniteRouter routing engine", {
+          providers: igniteCfg.providers.length
+        });
         const routingContext = {
           messages: parsedMessages,
           tools: parsed2.tools,
@@ -31906,31 +31984,78 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
           estimatedTokens: estimateTokenCount(parsedMessages),
           needsStreaming: parsed2.stream === true
         };
+        proxyLog.debug("Routing input", {
+          context: { ...routingContext, messages: `[${routingContext.messages.length} messages]` },
+          providerCount: igniteCfg.providers.length,
+          providers: igniteCfg.providers.map((p) => ({ id: p.id, tools: p.supportsTools }))
+        });
         const igniteDecision = await route2(routingContext, igniteCfg);
         if (igniteDecision.error) {
-          proxyLog.error("Routing failed \u2014 no candidates available", { error: igniteDecision.error });
+          proxyLog.error("Routing failed \u2014 no candidates available", {
+            error: igniteDecision.error
+          });
           res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: { message: igniteDecision.error, type: "invalid_request_error" } }));
+          res.end(
+            JSON.stringify({
+              error: { message: igniteDecision.error, type: "invalid_request_error" }
+            })
+          );
           return;
         }
-        const igniteCandidates = igniteDecision.candidateProviders.map((p) => ({ provider: p, priorityScore: 0, reasons: [] }));
+        const igniteCandidates = igniteDecision.candidateProviders.map((p) => ({
+          provider: p,
+          priorityScore: 0,
+          reasons: []
+        }));
         const buildRequestInit = (provider) => {
-          const { url, headers: providerHeaders, body: providerBody } = buildUpstreamRequest(provider, JSON.parse(body.toString()));
-          const headersObj = { ...providerHeaders };
+          const originalBody = JSON.parse(body.toString());
+          const normalizedBody = normalizeRequestForModel(originalBody, provider.id);
+          const {
+            url,
+            headers: providerHeaders,
+            body: providerBody
+          } = buildUpstreamRequest(provider, normalizedBody);
+          const headersObj = {};
+          for (const [k, v] of Object.entries(providerHeaders)) {
+            headersObj[k.toLowerCase()] = v;
+          }
           for (const [key, val] of Object.entries(req.headers)) {
-            if (key.toLowerCase() !== "host" && key.toLowerCase() !== "authorization" && !providerHeaders[key]) {
-              headersObj[key] = Array.isArray(val) ? val[0] ?? "" : val ?? "";
+            const k = key.toLowerCase();
+            if (k !== "host" && k !== "authorization" && k !== "content-length" && // Let fetch recalculate
+            !headersObj[k]) {
+              headersObj[k] = Array.isArray(val) ? val[0] ?? "" : val ?? "";
             }
           }
-          headersObj["Content-Type"] = "application/json";
-          headersObj["User-Agent"] = USER_AGENT;
-          return { url, init: { method: "POST", headers: headersObj, body: JSON.stringify(providerBody) } };
+          headersObj["content-type"] = "application/json";
+          headersObj["user-agent"] = USER_AGENT;
+          proxyLog.debug("Upstream details", {
+            url,
+            model: provider.id,
+            finalHeaders: Object.keys(headersObj)
+          });
+          return {
+            url,
+            init: { method: "POST", headers: headersObj, body: JSON.stringify(providerBody) }
+          };
         };
-        const fallbackResult = await callWithFallback(igniteCandidates, (provider) => buildRequestInit(provider), { timeoutMs: options.requestTimeoutMs ?? 3e4, retryableOnly: true });
+        const fallbackResult = await callWithFallback(
+          igniteCandidates,
+          (provider) => buildRequestInit(provider),
+          { timeoutMs: options.requestTimeoutMs ?? 3e4, retryableOnly: false }
+        );
         if (!fallbackResult.success) {
-          proxyLog.error("All providers failed", { tried: fallbackResult.attempts.map((a) => a.provider.id) });
+          proxyLog.error("All providers failed", {
+            tried: fallbackResult.attempts.map((a) => a.provider.id)
+          });
           res.writeHead(503, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: { message: fallbackResult.errorSummary ?? "All models failed", type: "service_unavailable" } }));
+          res.end(
+            JSON.stringify({
+              error: {
+                message: fallbackResult.errorSummary ?? "All models failed",
+                type: "service_unavailable"
+              }
+            })
+          );
           return;
         }
         if (fallbackResult.finalResponse) {
@@ -31951,18 +32076,39 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
           });
           let finalResponseInputTokens = responseInputTokens ?? estimateTokenCount(parsedMessages);
           let finalResponseOutputTokens = responseOutputTokens ?? 100;
-          const cost = estimateCost(usedProvider, finalResponseInputTokens, finalResponseOutputTokens);
-          const savings = estimateSavings(cost, igniteCfg.providers, finalResponseInputTokens, finalResponseOutputTokens);
+          const cost = estimateCost(
+            usedProvider,
+            finalResponseInputTokens,
+            finalResponseOutputTokens
+          );
+          const savings = estimateSavings(
+            cost,
+            igniteCfg.providers,
+            finalResponseInputTokens,
+            finalResponseOutputTokens
+          );
           proxyLog.info("Cost estimate", {
             model: cost.modelId,
             cost: cost.formattedCost,
             savings: savings.formattedSavings,
             routingOverheadMs: igniteDecision.routingOverhead?.totalRoutingMs ?? igniteDecision.latencyMs
           });
-          res.setHeader("X-IgniteRouter-Model", usedProvider.id);
-          res.setHeader("X-IgniteRouter-Tier", igniteDecision.tier || "UNKNOWN");
-          res.setHeader("X-IgniteRouter-Task", igniteDecision.taskType || "UNKNOWN");
+          const model = usedProvider.id;
+          const tier = igniteDecision.tier ?? "UNKNOWN";
+          const task = igniteDecision.taskType ?? "UNKNOWN";
+          res.setHeader("X-IgniteRouter-Model", model);
+          res.setHeader("X-IgniteRouter-Tier", tier);
+          res.setHeader("X-IgniteRouter-Task", task);
           res.setHeader("X-IgniteRouter-Latency", `${Date.now() - startTime}ms`);
+          if (options.onRouted) {
+            options.onRouted({
+              ...igniteDecision,
+              model,
+              costEstimate: cost.totalCostUsd,
+              savings: savings.savedPercent / 100,
+              reasoning: `Selected ${model} for ${task} (${tier})`
+            });
+          }
           if (fallbackResult.finalResponse.body) {
             const s = Readable.fromWeb(fallbackResult.finalResponse.body);
             finished(s, (err) => {
@@ -32618,7 +32764,18 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
+      const errorStack = err instanceof Error ? err.stack : "";
       proxyLog.error(` Routing error: ${errorMsg}`);
+      try {
+        __require("fs").appendFileSync(
+          "/tmp/ignite-router-error.log",
+          `${(/* @__PURE__ */ new Date()).toISOString()} Error: ${errorMsg}
+Stack: ${errorStack}
+
+`
+        );
+      } catch {
+      }
       proxyLog.error(` Need help? Run: npx @igniterouter/igniterouter doctor`);
       options.onError?.(new Error(`Routing failed: ${errorMsg}`));
     }

@@ -533,8 +533,8 @@ async function checkExistingProxy(
         wallet?: string;
         paymentChain?: string;
       };
-      if (data.status === "ok" && data.wallet) {
-        return { wallet: data.wallet, paymentChain: data.paymentChain };
+      if (data.status === "ok") {
+        return { wallet: data.wallet ?? "", paymentChain: data.paymentChain };
       }
     }
     return undefined;
@@ -1468,6 +1468,7 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
         version: VERSION,
         providers: igniteCfg.providers.length,
         defaultPriority: igniteCfg.defaultPriority,
+        wallet: "",
       };
       if (upstreamProxy) {
         response.upstreamProxy = upstreamProxy;
@@ -1538,17 +1539,17 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
     if (req.url === "/v1/models" && req.method === "GET") {
       const igniteCfg = options.igniteConfig ?? { defaultPriority: "cost", providers: [] };
       const staticModels = buildProxyModelList();
-      
+
       // Add configured providers to models list
-      const providerModels = igniteCfg.providers.map(p => ({
+      const providerModels = igniteCfg.providers.map((p) => ({
         id: p.id,
         object: "model" as const,
         created: Math.floor(Date.now() / 1000),
-        owned_by: p.id.split("/")[0] ?? "user"
+        owned_by: p.id.split("/")[0] ?? "user",
       }));
 
       // Deduplicate by ID
-      const seen = new Set(staticModels.map(m => m.id));
+      const seen = new Set(staticModels.map((m) => m.id));
       const allModels = [...staticModels];
       for (const m of providerModels) {
         if (!seen.has(m.id)) {
@@ -2022,6 +2023,49 @@ type ModelRequestResult = {
 };
 
 /**
+ * Apply all message normalizations for a specific model.
+ * Handles: role mapping, debranding, truncation, tool ID sanitization,
+ * Google-specific constraints, and thinking/reasoning model requirements.
+ */
+function normalizeRequestForModel(
+  parsed: Record<string, any>,
+  modelId: string,
+): Record<string, any> {
+  const messages = parsed.messages;
+  if (!Array.isArray(messages)) return parsed;
+
+  // 1. Normalize message roles (e.g., "developer" -> "system")
+  parsed.messages = normalizeMessageRoles(messages as ChatMessage[]);
+
+  // 2. Remove "IgniteRouter" branding from system messages
+  parsed.messages = debrandSystemMessages(parsed.messages as ChatMessage[], modelId);
+
+  // 3. Truncate messages to stay under IgniteRouter's limit (200 messages)
+  const truncationResult = truncateMessages(parsed.messages as ChatMessage[]);
+  parsed.messages = truncationResult.messages;
+
+  // 4. Sanitize tool IDs to match Anthropic's pattern
+  parsed.messages = sanitizeToolIds(parsed.messages as ChatMessage[]);
+
+  // 5. Normalize messages for Google models
+  if (isGoogleModel(modelId)) {
+    parsed.messages = normalizeMessagesForGoogle(parsed.messages as ChatMessage[]);
+  }
+
+  // 6. Normalize messages for thinking-enabled requests
+  const hasThinkingEnabled = !!(
+    parsed.thinking ||
+    parsed.extended_thinking ||
+    isReasoningModel(modelId)
+  );
+  if (hasThinkingEnabled) {
+    parsed.messages = normalizeMessagesForThinking(parsed.messages as ExtendedChatMessage[]);
+  }
+
+  return parsed;
+}
+
+/**
  * Attempt a request with a specific model.
  * Returns the response or error details for fallback decision.
  */
@@ -2037,47 +2081,9 @@ async function tryModelRequest(
   // Update model in body and normalize messages
   let requestBody = body;
   try {
-    const parsed = JSON.parse(body.toString()) as Record<string, unknown>;
+    let parsed = JSON.parse(body.toString()) as Record<string, any>;
     parsed.model = toUpstreamModelId(modelId);
-
-    // Normalize message roles (e.g., "developer" -> "system")
-    if (Array.isArray(parsed.messages)) {
-      parsed.messages = normalizeMessageRoles(parsed.messages as ChatMessage[]);
-    }
-
-    // Remove "IgniteRouter" branding from system messages so upstream LLMs don't
-    // adopt "IgniteRouter" as their identity (overriding user's SOUL.md persona).
-    if (Array.isArray(parsed.messages)) {
-      parsed.messages = debrandSystemMessages(parsed.messages as ChatMessage[], modelId);
-    }
-
-    // Truncate messages to stay under IgniteRouter's limit (200 messages)
-    if (Array.isArray(parsed.messages)) {
-      const truncationResult = truncateMessages(parsed.messages as ChatMessage[]);
-      parsed.messages = truncationResult.messages;
-    }
-
-    // Sanitize tool IDs to match Anthropic's pattern (alphanumeric, underscore, hyphen only)
-    if (Array.isArray(parsed.messages)) {
-      parsed.messages = sanitizeToolIds(parsed.messages as ChatMessage[]);
-    }
-
-    // Normalize messages for Google models (first non-system message must be "user")
-    if (isGoogleModel(modelId) && Array.isArray(parsed.messages)) {
-      parsed.messages = normalizeMessagesForGoogle(parsed.messages as ChatMessage[]);
-    }
-
-    // Normalize messages for thinking-enabled requests (add reasoning_content to all assistant messages)
-    // Check request flags AND target model - reasoning models have thinking enabled server-side
-    const hasThinkingEnabled = !!(
-      parsed.thinking ||
-      parsed.extended_thinking ||
-      isReasoningModel(modelId)
-    );
-    if (hasThinkingEnabled && Array.isArray(parsed.messages)) {
-      parsed.messages = normalizeMessagesForThinking(parsed.messages as ExtendedChatMessage[]);
-    }
-
+    parsed = normalizeRequestForModel(parsed, modelId);
     requestBody = Buffer.from(JSON.stringify(parsed));
   } catch {
     // If body isn't valid JSON, use as-is
@@ -2132,10 +2138,11 @@ async function tryModelRequest(
 
     return { success: true, response };
   } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
+    const error = err as Error;
+    proxyLog.error(`fetch failed: ${error.message} (${error.name})`, { url: upstreamUrl });
     return {
       success: false,
-      errorBody: errorMsg,
+      errorBody: error.message,
       errorStatus: 500,
       isProviderError: true, // Network errors are retryable
     };
@@ -2163,6 +2170,7 @@ async function proxyRequest(
   sessionJournal: SessionJournal,
 ): Promise<void> {
   const startTime = Date.now();
+  proxyLog.info(`Request: ${req.method} ${req.url}`);
 
   // Build upstream URL: /v1/chat/completions → https://IgniteRouter.ai/api/v1/chat/completions
   const upstreamUrl = `${apiBase}${req.url}`;
@@ -2180,10 +2188,10 @@ async function proxyRequest(
     // Not JSON or empty body
   }
 
-  proxyLog.debug("Request received", { 
-    model: parsed?.model, 
-    stream: parsed?.stream, 
-    msgCount: parsed?.messages?.length 
+  proxyLog.debug("Request received", {
+    model: parsed?.model,
+    stream: parsed?.stream,
+    msgCount: parsed?.messages?.length,
   });
 
   // Track original context size for response headers
@@ -2260,8 +2268,7 @@ async function proxyRequest(
                 .join(" ")
             : "";
       const systemMsg = parsedMessages.find((m) => m.role === "system");
-      const systemPrompt =
-        typeof systemMsg?.content === "string" ? systemMsg.content : undefined;
+      const systemPrompt = typeof systemMsg?.content === "string" ? systemMsg.content : undefined;
 
       hasVision = parsedMessages.some((m) => {
         if (Array.isArray(m.content)) {
@@ -2271,7 +2278,11 @@ async function proxyRequest(
       });
 
       // --- /model, /priority, /help slash commands ---
-      if (lastContent.startsWith("/model") || lastContent.startsWith("/priority") || lastContent.startsWith("/help")) {
+      if (
+        lastContent.startsWith("/model") ||
+        lastContent.startsWith("/priority") ||
+        lastContent.startsWith("/help")
+      ) {
         const parts = lastContent.split(/\s+/);
         const cmd = parts[0].toLowerCase();
         let responseText = "";
@@ -2283,7 +2294,12 @@ async function proxyRequest(
             responseText = "Model reset to automatic routing.";
           } else if (sub === "list") {
             const igniteCfg = options.igniteConfig ?? { defaultPriority: "cost", providers: [] };
-            const tiers: Record<string, string[]> = { SIMPLE: [], MEDIUM: [], COMPLEX: [], REASONING: [] };
+            const tiers: Record<string, string[]> = {
+              SIMPLE: [],
+              MEDIUM: [],
+              COMPLEX: [],
+              REASONING: [],
+            };
             for (const p of igniteCfg.providers) {
               const tier = p.tier || "MEDIUM";
               const cost = (p.inputPricePerMToken + p.outputPricePerMToken) / 2;
@@ -2296,7 +2312,7 @@ async function proxyRequest(
               `complex tier: ${tiers.COMPLEX.join(", ") || "none"}`,
               `expert tier:  ${tiers.REASONING.join(", ") || "none"}`,
               `Current priority: ${igniteCfg.defaultPriority}`,
-              "Use /model <id> to override, /priority <mode> to change ranking."
+              "Use /model <id> to override, /priority <mode> to change ranking.",
             ].join("\n");
           } else if (parts[1]) {
             responseText = `Model override set to ${parts[1]}.`;
@@ -2324,7 +2340,7 @@ async function proxyRequest(
             "  /priority <mode>   - Change ranking (cost|speed|quality)",
             "  /debug             - Show routing diagnostics",
             "  /imagegen <prompt> - Generate an image",
-            "  /help              - Show this help"
+            "  /help              - Show this help",
           ].join("\n");
         }
 
@@ -2336,14 +2352,28 @@ async function proxyRequest(
             object: "chat.completion",
             created: timestamp,
             model: "igniterouter/command",
-            choices: [{ index: 0, message: { role: "assistant", content: responseText }, finish_reason: "stop" }],
-            usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+            choices: [
+              {
+                index: 0,
+                message: { role: "assistant", content: responseText },
+                finish_reason: "stop",
+              },
+            ],
+            usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
           };
 
           if (isStreaming) {
-            res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
-            res.write(`data: ${JSON.stringify({ ...syntheticResponse, object: "chat.completion.chunk", choices: [{ index: 0, delta: { role: "assistant", content: responseText }, finish_reason: null }] })}\n\n`);
-            res.write(`data: ${JSON.stringify({ ...syntheticResponse, object: "chat.completion.chunk", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`);
+            res.writeHead(200, {
+              "Content-Type": "text/event-stream",
+              "Cache-Control": "no-cache",
+              Connection: "keep-alive",
+            });
+            res.write(
+              `data: ${JSON.stringify({ ...syntheticResponse, object: "chat.completion.chunk", choices: [{ index: 0, delta: { role: "assistant", content: responseText }, finish_reason: null }] })}\n\n`,
+            );
+            res.write(
+              `data: ${JSON.stringify({ ...syntheticResponse, object: "chat.completion.chunk", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`,
+            );
             res.write("data: [DONE]\n\n");
             res.end();
           } else {
@@ -2355,7 +2385,9 @@ async function proxyRequest(
       }
 
       // --- IgniteRouter: use new routing engine when providers are configured ---
-      const igniteCfg = { ...(options.igniteConfig ?? { defaultPriority: "cost" as const, providers: [] }) };
+      const igniteCfg = {
+        ...(options.igniteConfig ?? { defaultPriority: "cost" as const, providers: [] }),
+      };
       if (effectiveSessionId) {
         const sess = sessionStore.getSession(effectiveSessionId);
         if (sess?.priority) {
@@ -2364,8 +2396,15 @@ async function proxyRequest(
       }
       const useIgniteRouting = igniteCfg.providers && igniteCfg.providers.length > 0;
 
+      proxyLog.info("Routing decision", {
+        useIgniteRouting,
+        providersCount: igniteCfg.providers?.length ?? 0,
+      });
+
       if (useIgniteRouting) {
-        proxyLog.info("Using IgniteRouter routing engine", { providers: igniteCfg.providers.length });
+        proxyLog.info("Using IgniteRouter routing engine", {
+          providers: igniteCfg.providers.length,
+        });
 
         const routingContext: RoutingContext = {
           messages: parsedMessages,
@@ -2375,56 +2414,120 @@ async function proxyRequest(
           needsStreaming: parsed.stream === true,
         };
 
+        proxyLog.debug("Routing input", {
+          context: { ...routingContext, messages: `[${routingContext.messages.length} messages]` },
+          providerCount: igniteCfg.providers.length,
+          providers: igniteCfg.providers.map((p) => ({ id: p.id, tools: p.supportsTools })),
+        });
+
         const igniteDecision = await igniteRoute(routingContext, igniteCfg);
 
         if (igniteDecision.error) {
-          proxyLog.error("Routing failed — no candidates available", { error: igniteDecision.error });
+          proxyLog.error("Routing failed — no candidates available", {
+            error: igniteDecision.error,
+          });
           res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: { message: igniteDecision.error, type: "invalid_request_error" } }));
+          res.end(
+            JSON.stringify({
+              error: { message: igniteDecision.error, type: "invalid_request_error" },
+            }),
+          );
           return;
         }
 
-        const igniteCandidates = igniteDecision.candidateProviders.map((p) => ({ provider: p, priorityScore: 0, reasons: [] as string[] }));
+        const igniteCandidates = igniteDecision.candidateProviders.map((p) => ({
+          provider: p,
+          priorityScore: 0,
+          reasons: [] as string[],
+        }));
 
         const buildRequestInit = (provider: UserProvider): { url: string; init: RequestInit } => {
-          const { url, headers: providerHeaders, body: providerBody } = buildUpstreamRequest(provider, JSON.parse(body.toString()));
-          const headersObj: Record<string, string> = { ...providerHeaders };
+          const originalBody = JSON.parse(body.toString());
+          const normalizedBody = normalizeRequestForModel(originalBody, provider.id);
+
+          const {
+            url,
+            headers: providerHeaders,
+            body: providerBody,
+          } = buildUpstreamRequest(provider, normalizedBody);
+
+          const headersObj: Record<string, string> = {};
+          // Start with provider-specific headers (usually auth)
+          for (const [k, v] of Object.entries(providerHeaders)) {
+            headersObj[k.toLowerCase()] = v;
+          }
+
+          // Add headers from incoming request if not already set
           for (const [key, val] of Object.entries(req.headers)) {
-            if (key.toLowerCase() !== "host" && key.toLowerCase() !== "authorization" && !providerHeaders[key]) {
-              headersObj[key] = Array.isArray(val) ? (val[0] ?? "") : (val ?? "");
+            const k = key.toLowerCase();
+            if (
+              k !== "host" &&
+              k !== "authorization" &&
+              k !== "content-length" && // Let fetch recalculate
+              !headersObj[k]
+            ) {
+              headersObj[k] = Array.isArray(val) ? (val[0] ?? "") : (val ?? "");
             }
           }
-          headersObj["Content-Type"] = "application/json";
-          headersObj["User-Agent"] = USER_AGENT;
-          return { url, init: { method: "POST", headers: headersObj, body: JSON.stringify(providerBody) } };
+
+          headersObj["content-type"] = "application/json";
+          headersObj["user-agent"] = USER_AGENT;
+
+          proxyLog.debug("Upstream details", {
+            url,
+            model: provider.id,
+            finalHeaders: Object.keys(headersObj),
+          });
+
+          return {
+            url,
+            init: { method: "POST", headers: headersObj, body: JSON.stringify(providerBody) },
+          };
         };
 
-        const fallbackResult = await callWithFallback(igniteCandidates, (provider) => buildRequestInit(provider), { timeoutMs: options.requestTimeoutMs ?? 30000, retryableOnly: true });
+        const fallbackResult = await callWithFallback(
+          igniteCandidates,
+          (provider) => buildRequestInit(provider),
+          { timeoutMs: options.requestTimeoutMs ?? 30000, retryableOnly: false },
+        );
 
         if (!fallbackResult.success) {
-          proxyLog.error("All providers failed", { tried: fallbackResult.attempts.map((a) => a.provider.id) });
+          proxyLog.error("All providers failed", {
+            tried: fallbackResult.attempts.map((a) => a.provider.id),
+          });
           res.writeHead(503, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: { message: fallbackResult.errorSummary ?? "All models failed", type: "service_unavailable" } }));
+          res.end(
+            JSON.stringify({
+              error: {
+                message: fallbackResult.errorSummary ?? "All models failed",
+                type: "service_unavailable",
+              },
+            }),
+          );
           return;
         }
 
         if (fallbackResult.finalResponse) {
           res.statusCode = fallbackResult.finalResponse.status;
           fallbackResult.finalResponse.headers.forEach((value, key) => {
-            if (key.toLowerCase() !== "transfer-encoding" && key.toLowerCase() !== "content-length" && key.toLowerCase() !== "connection") {
+            if (
+              key.toLowerCase() !== "transfer-encoding" &&
+              key.toLowerCase() !== "content-length" &&
+              key.toLowerCase() !== "connection"
+            ) {
               res.setHeader(key, value);
             }
           });
 
           const usedProvider = fallbackResult.usedProvider as UserProvider;
           const selectedModel = usedProvider.id;
-          
-          proxyLog.info("Request completed", { 
-            model: selectedModel, 
+
+          proxyLog.info("Request completed", {
+            model: selectedModel,
             tier: igniteDecision.tier,
             task: igniteDecision.taskType,
             latencyMs: Date.now() - startTime,
-            attempts: fallbackResult.attempts.length
+            attempts: fallbackResult.attempts.length,
           });
 
           // After successful response (you have usage from the LLM response if available):
@@ -2432,20 +2535,45 @@ async function proxyRequest(
           let finalResponseInputTokens = responseInputTokens ?? estimateTokenCount(parsedMessages);
           let finalResponseOutputTokens = responseOutputTokens ?? 100;
 
-          const cost = estimateCost(usedProvider, finalResponseInputTokens, finalResponseOutputTokens);
-          const savings = estimateSavings(cost, igniteCfg.providers, finalResponseInputTokens, finalResponseOutputTokens);
+          const cost = estimateCost(
+            usedProvider,
+            finalResponseInputTokens,
+            finalResponseOutputTokens,
+          );
+          const savings = estimateSavings(
+            cost,
+            igniteCfg.providers,
+            finalResponseInputTokens,
+            finalResponseOutputTokens,
+          );
 
           proxyLog.info("Cost estimate", {
             model: cost.modelId,
             cost: cost.formattedCost,
             savings: savings.formattedSavings,
-            routingOverheadMs: igniteDecision.routingOverhead?.totalRoutingMs ?? igniteDecision.latencyMs
+            routingOverheadMs:
+              igniteDecision.routingOverhead?.totalRoutingMs ?? igniteDecision.latencyMs,
           });
 
-          res.setHeader("X-IgniteRouter-Model", usedProvider.id);
-          res.setHeader("X-IgniteRouter-Tier", igniteDecision.tier || "UNKNOWN");
-          res.setHeader("X-IgniteRouter-Task", igniteDecision.taskType || "UNKNOWN");
+          const model = usedProvider.id;
+          const tier = igniteDecision.tier ?? "UNKNOWN";
+          const task = igniteDecision.taskType ?? "UNKNOWN";
+
+          res.setHeader("X-IgniteRouter-Model", model);
+          res.setHeader("X-IgniteRouter-Tier", tier);
+          res.setHeader("X-IgniteRouter-Task", task);
           res.setHeader("X-IgniteRouter-Latency", `${Date.now() - startTime}ms`);
+
+          // Call onRouted for IgniteRouter's new routing engine
+          if (options.onRouted) {
+            options.onRouted({
+              ...igniteDecision,
+              model,
+              costEstimate: cost.totalCostUsd,
+              savings: savings.savedPercent / 100,
+              reasoning: `Selected ${model} for ${task} (${tier})`,
+            } as any);
+          }
 
           if (fallbackResult.finalResponse.body) {
             const s = Readable.fromWeb(fallbackResult.finalResponse.body as any);
@@ -3249,7 +3377,15 @@ async function proxyRequest(
     } catch (err) {
       // Log routing errors so they're not silently swallowed
       const errorMsg = err instanceof Error ? err.message : String(err);
+      const errorStack = err instanceof Error ? err.stack : "";
       proxyLog.error(` Routing error: ${errorMsg}`);
+      // Write stack to debug file
+      try {
+        require("fs").appendFileSync(
+          "/tmp/ignite-router-error.log",
+          `${new Date().toISOString()} Error: ${errorMsg}\nStack: ${errorStack}\n\n`,
+        );
+      } catch {}
       proxyLog.error(` Need help? Run: npx @igniterouter/igniterouter doctor`);
       options.onError?.(new Error(`Routing failed: ${errorMsg}`));
     }
@@ -4317,7 +4453,8 @@ async function proxyRequest(
       // Always include cost visibility headers when routing is active
       if (routingDecision) {
         responseHeaders["x-IgniteRouter-cost"] = routingDecision.costEstimate.toFixed(6);
-        responseHeaders["x-IgniteRouter-savings"] = `${(routingDecision.savings * 100).toFixed(0)}%`;
+        responseHeaders["x-IgniteRouter-savings"] =
+          `${(routingDecision.savings * 100).toFixed(0)}%`;
       }
 
       // Collect full body for possible notice injection
@@ -4515,4 +4652,3 @@ async function proxyRequest(
     logUsage(entry).catch(() => {});
   }
 }
-

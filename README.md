@@ -16,7 +16,7 @@ You bring your own API keys for OpenAI, Anthropic, Google, DeepSeek, OpenRouter,
 1. **Request Received** — OpenClaw sends `POST /v1/chat/completions` with `model: "igniterouter/auto"` to `localhost:8402`.
 2. **Override Check** — Did the user say `/model gpt-4o` or use `claude` in their message? If yes, skip routing and call that model directly.
 3. **Task Classification** — (Local, <1ms, no API call) Classifies prompt as one of: Chat / Creative / Reasoning / Agentic / Vision / Deep.
-4. **Complexity Scoring** — Keyword scorer gives a score 0.0–1.0, mapped to tier: Simple / Medium / Complex / Expert. *Optional: RouteLLM local server for more accurate scoring.*
+4. **Complexity Scoring** — Keyword scorer gives a score 0.0–1.0, mapped to tier: Simple / Medium / Complex / Expert. _Optional: RouteLLM local server for more accurate scoring._
 5. **Candidate Selection** — Filters your provider list (removes models that can't handle vision/tools/context size), then ranks by your priority setting (cost / speed / quality) plus specialisation bonuses.
 6. **Fallback Caller** — Tries candidates in order. On 429/500/503: try next. On 400: stop (prompt issue). On 401: skip this provider, try next.
 7. **Provider URL Builder** — Constructs the correct request for each provider type (different URL, headers, body format for OpenAI vs Anthropic vs Google vs Ollama).
@@ -65,44 +65,46 @@ X-IgniteRouter-Task: reasoning
 
 ## Task Types
 
-| Task Type | When it triggers | Example prompt |
-|-----------|-----------------|----------------|
-| Vision | Image present in content (signal-based) | "What is in this image?" |
-| Agentic | tools array present OR keywords like "search and", "execute", "automate" | "Search the web and summarise" |
-| Deep | Prompt >8000 tokens OR keywords: "prove", "architect", "dissertation", "formally verify" | "Prove that sqrt(2) is irrational" |
-| Reasoning | Keywords: "analyse", "compare", "tradeoffs", "step by step", "should I", "evaluate" | "Compare microservices vs monolith" |
-| Creative | Keywords: "write a", "story", "poem", "brainstorm", "imagine", "invent" | "Write a short story about AI" |
-| Chat | Default — nothing above matched | "Hello, how are you?" |
+| Task Type | When it triggers                                                                         | Example prompt                      |
+| --------- | ---------------------------------------------------------------------------------------- | ----------------------------------- |
+| Vision    | Image present in content (signal-based)                                                  | "What is in this image?"            |
+| Agentic   | tools array present OR keywords like "search and", "execute", "automate"                 | "Search the web and summarise"      |
+| Deep      | Prompt >8000 tokens OR keywords: "prove", "architect", "dissertation", "formally verify" | "Prove that sqrt(2) is irrational"  |
+| Reasoning | Keywords: "analyse", "compare", "tradeoffs", "step by step", "should I", "evaluate"      | "Compare microservices vs monolith" |
+| Creative  | Keywords: "write a", "story", "poem", "brainstorm", "imagine", "invent"                  | "Write a short story about AI"      |
+| Chat      | Default — nothing above matched                                                          | "Hello, how are you?"               |
 
 ## Complexity Tiers
 
-| Tier | Score Range | Maps to | Example |
-|------|------------|---------|---------|
-| SIMPLE | 0.00 – 0.30 | Cheapest model in this tier | "What is 2+2?" |
-| MEDIUM | 0.30 – 0.60 | Mid-range model | "Explain how TCP/IP works" |
-| COMPLEX | 0.60 – 0.85 | Capable model | "Build a React component" |
-| EXPERT | 0.85 – 1.00 | Most capable model | "Prove this theorem step by step" |
+| Tier    | Score Range | Maps to                     | Example                           |
+| ------- | ----------- | --------------------------- | --------------------------------- |
+| SIMPLE  | 0.00 – 0.30 | Cheapest model in this tier | "What is 2+2?"                    |
+| MEDIUM  | 0.30 – 0.60 | Mid-range model             | "Explain how TCP/IP works"        |
+| COMPLEX | 0.60 – 0.85 | Capable model               | "Build a React component"         |
+| EXPERT  | 0.85 – 1.00 | Most capable model          | "Prove this theorem step by step" |
 
 ## Supported Providers
 
-| Provider prefix | Example model ID | Base URL used | Auth |
-|----------------|-----------------|---------------|------|
-| openai/ | openai/gpt-4o | https://api.openai.com/v1 | Authorization: Bearer |
-| anthropic/ | anthropic/claude-opus-4 | https://api.anthropic.com/v1 | x-api-key header |
-| google/ | google/gemini-2.5-flash | generativelanguage.googleapis.com | key= query param |
-| deepseek/ | deepseek/deepseek-chat | https://api.deepseek.com/v1 | Authorization: Bearer |
-| openrouter/ | openrouter/auto | https://openrouter.ai/api/v1 | Authorization: Bearer |
-| ollama/ | ollama/llama3:8b | http://localhost:11434 (default) | None |
-| custom | any/custom | Your baseUrl | Optional Bearer |
+| Provider prefix | Example model ID        | Base URL used                     | Auth                  |
+| --------------- | ----------------------- | --------------------------------- | --------------------- |
+| openai/         | openai/gpt-4o           | https://api.openai.com/v1         | Authorization: Bearer |
+| anthropic/      | anthropic/claude-opus-4 | https://api.anthropic.com/v1      | x-api-key header      |
+| google/         | google/gemini-2.5-flash | generativelanguage.googleapis.com | key= query param      |
+| deepseek/       | deepseek/deepseek-chat  | https://api.deepseek.com/v1       | Authorization: Bearer |
+| openrouter/     | openrouter/auto         | https://openrouter.ai/api/v1      | Authorization: Bearer |
+| ollama/         | ollama/llama3:8b        | http://localhost:11434 (default)  | None                  |
+| custom          | any/custom              | Your baseUrl                      | Optional Bearer       |
 
 ## Quick Start — Installing in OpenClaw
 
 **Step 1 — Install Node 20+ and OpenClaw (if not already):**
+
 ```bash
 npm install -g openclaw@latest
 ```
 
 **Step 2 — Clone and build IgniteRouter:**
+
 ```bash
 git clone https://github.com/sakshamagarwalm2/IgniteRouter.git
 cd IgniteRouter
@@ -111,6 +113,7 @@ npm run build
 ```
 
 **Step 3 — Install as a local plugin:**
+
 ```bash
 openclaw plugins install . --local
 ```
@@ -165,11 +168,13 @@ On Windows: `%APPDATA%\openclaw\openclaw.json`. On Mac/Linux: `~/.openclaw/openc
 ```
 
 **Step 5 — Restart the gateway:**
+
 ```bash
 openclaw gateway restart
 ```
 
 **Step 6 — Verify it's working:**
+
 ```bash
 # Check proxy is running
 curl http://localhost:8402/health
@@ -182,6 +187,7 @@ openclaw logs --follow
 ```
 
 Expected `/health` response:
+
 ```json
 {
   "status": "ok",
@@ -194,74 +200,75 @@ Expected `/health` response:
 
 ## Provider Configuration Reference
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| id | string | Yes | Model ID e.g. "openai/gpt-4o". Prefix determines provider type. |
-| apiKey | string | For cloud models | Your API key for this provider |
-| baseUrl | string | For Ollama/custom | Custom endpoint e.g. "http://localhost:11434" |
-| tier | string | Yes | SIMPLE / MEDIUM / COMPLEX / EXPERT — which complexity level this model handles |
-| specialisedFor | string[] | No | Task types this model excels at. Gets +25 priority bonus. Values: chat, creative, reasoning, agentic, vision, deep |
-| avoidFor | string[] | No | Task types to deprioritise this model for. Gets -20 penalty. |
-| priorityForTasks | object | No | Explicit rank override per task. { "vision": 1 } means always first for vision tasks |
+| Field            | Type     | Required          | Description                                                                                                        |
+| ---------------- | -------- | ----------------- | ------------------------------------------------------------------------------------------------------------------ |
+| id               | string   | Yes               | Model ID e.g. "openai/gpt-4o". Prefix determines provider type.                                                    |
+| apiKey           | string   | For cloud models  | Your API key for this provider                                                                                     |
+| baseUrl          | string   | For Ollama/custom | Custom endpoint e.g. "http://localhost:11434"                                                                      |
+| tier             | string   | Yes               | SIMPLE / MEDIUM / COMPLEX / EXPERT — which complexity level this model handles                                     |
+| specialisedFor   | string[] | No                | Task types this model excels at. Gets +25 priority bonus. Values: chat, creative, reasoning, agentic, vision, deep |
+| avoidFor         | string[] | No                | Task types to deprioritise this model for. Gets -20 penalty.                                                       |
+| priorityForTasks | object   | No                | Explicit rank override per task. { "vision": 1 } means always first for vision tasks                               |
 
 ## Routing Priority Modes
 
-| Mode | What it does |
-|------|-------------|
-| cost | Cheapest model first. Free/local models always preferred. |
-| speed | Fastest model first (lowest avgLatencyMs). |
-| quality | Most capable model first (highest tier preferred). |
+| Mode    | What it does                                              |
+| ------- | --------------------------------------------------------- |
+| cost    | Cheapest model first. Free/local models always preferred. |
+| speed   | Fastest model first (lowest avgLatencyMs).                |
+| quality | Most capable model first (highest tier preferred).        |
 
 Change via config: `"defaultPriority": "speed"` — or at runtime with `/priority speed` in any message.
 
 ## Slash Commands
 
-| Command | What it does |
-|---------|-------------|
-| /model auto | Reset to automatic routing |
-| /model openai/gpt-4o | Use this specific model for this message |
-| /model list | Show all configured providers and their tiers |
-| /priority cost | Change routing priority to cost mode |
-| /priority speed | Change routing priority to speed mode |
-| /priority quality | Change routing priority to quality mode |
-| /help | Show available commands |
+| Command              | What it does                                  |
+| -------------------- | --------------------------------------------- |
+| /model auto          | Reset to automatic routing                    |
+| /model openai/gpt-4o | Use this specific model for this message      |
+| /model list          | Show all configured providers and their tiers |
+| /priority cost       | Change routing priority to cost mode          |
+| /priority speed      | Change routing priority to speed mode         |
+| /priority quality    | Change routing priority to quality mode       |
+| /help                | Show available commands                       |
 
 ## Pre-loaded Model Registry
 
 These models are known to IgniteRouter — if you add them, metadata is auto-filled. You only need to provide `id`, `apiKey`, and `tier`:
 
-| Model ID | Context | Vision | Tools | Input $/M | Output $/M |
-|----------|---------|--------|-------|-----------|------------|
-| openai/gpt-4o | 128k | ✓ | ✓ | $2.50 | $10.00 |
-| openai/gpt-4o-mini | 128k | ✓ | ✓ | $0.15 | $0.60 |
-| openai/o3 | 200k | — | ✓ | $2.00 | $8.00 |
-| openai/o4-mini | 128k | — | ✓ | $1.10 | $4.40 |
-| anthropic/claude-opus-4 | 200k | ✓ | ✓ | $15.00 | $75.00 |
-| anthropic/claude-sonnet-4 | 200k | ✓ | ✓ | $3.00 | $15.00 |
-| anthropic/claude-haiku-4 | 200k | ✓ | ✓ | $0.80 | $4.00 |
-| google/gemini-2.5-pro | 1M | ✓ | ✓ | $1.25 | $10.00 |
-| google/gemini-2.5-flash | 1M | ✓ | ✓ | $0.15 | $0.60 |
-| google/gemini-2.5-flash-lite | 1M | ✓ | ✓ | $0.10 | $0.40 |
-| deepseek/deepseek-chat | 128k | — | ✓ | $0.14 | $0.28 |
-| deepseek/deepseek-reasoner | 128k | — | — | $0.55 | $2.19 |
-| openrouter/auto | 200k | ✓ | ✓ | ~$3.00 | ~$15.00 |
+| Model ID                     | Context | Vision | Tools | Input $/M | Output $/M |
+| ---------------------------- | ------- | ------ | ----- | --------- | ---------- |
+| openai/gpt-4o                | 128k    | ✓      | ✓     | $2.50     | $10.00     |
+| openai/gpt-4o-mini           | 128k    | ✓      | ✓     | $0.15     | $0.60      |
+| openai/o3                    | 200k    | —      | ✓     | $2.00     | $8.00      |
+| openai/o4-mini               | 128k    | —      | ✓     | $1.10     | $4.40      |
+| anthropic/claude-opus-4      | 200k    | ✓      | ✓     | $15.00    | $75.00     |
+| anthropic/claude-sonnet-4    | 200k    | ✓      | ✓     | $3.00     | $15.00     |
+| anthropic/claude-haiku-4     | 200k    | ✓      | ✓     | $0.80     | $4.00      |
+| google/gemini-2.5-pro        | 1M      | ✓      | ✓     | $1.25     | $10.00     |
+| google/gemini-2.5-flash      | 1M      | ✓      | ✓     | $0.15     | $0.60      |
+| google/gemini-2.5-flash-lite | 1M      | ✓      | ✓     | $0.10     | $0.40      |
+| deepseek/deepseek-chat       | 128k    | —      | ✓     | $0.14     | $0.28      |
+| deepseek/deepseek-reasoner   | 128k    | —      | —     | $0.55     | $2.19      |
+| openrouter/auto              | 200k    | ✓      | ✓     | ~$3.00    | ~$15.00    |
 
-*For Ollama models (prefix ollama/): price is always $0, isLocal=true, no API key needed.*
+_For Ollama models (prefix ollama/): price is always $0, isLocal=true, no API key needed._
 
 ## Fallback Behavior
 
 When a model fails, IgniteRouter tries the next candidate automatically:
 
-| HTTP Status | What IgniteRouter does |
-|-------------|----------------------|
-| 429 Too Many Requests | Retry with next candidate |
-| 500 / 502 / 503 / 504 | Retry with next candidate |
-| 402 / quota exceeded | Retry with next candidate |
-| 401 Unauthorized | Skip this provider, try next (bad API key) |
-| 400 Bad Request | Stop entire chain — prompt issue, not provider issue |
-| Timeout (30s) | Retry with next candidate |
+| HTTP Status           | What IgniteRouter does                               |
+| --------------------- | ---------------------------------------------------- |
+| 429 Too Many Requests | Retry with next candidate                            |
+| 500 / 502 / 503 / 504 | Retry with next candidate                            |
+| 402 / quota exceeded  | Retry with next candidate                            |
+| 401 Unauthorized      | Skip this provider, try next (bad API key)           |
+| 400 Bad Request       | Stop entire chain — prompt issue, not provider issue |
+| Timeout (30s)         | Retry with next candidate                            |
 
 When all candidates fail, the error message shows exactly what was tried:
+
 ```text
 IgniteRouter tried 3 models:
 openai/gpt-4o-mini    rate-limit (429)
@@ -291,35 +298,57 @@ npm run test:watch
 
 Expected output: `Test Files  6 passed`, `Tests  404 passed`
 
+### Manual Test Scripts
+
+The `scripts/` directory contains additional test scripts for manual testing:
+
+```bash
+# Start the proxy first
+node start-proxy.js &
+
+# Test routing (run with proxy running)
+node scripts/test-routing.js
+
+# Test individual models
+node scripts/test-models.js
+
+# Test provider connectivity
+node scripts/test-providers.js
+```
+
+**Note:** The test scripts require a running proxy and configured API keys for actual LLM calls. Without API keys, the proxy will return 500 errors but the routing logic itself is tested.
+
 ## Optional: RouteLLM for Smarter Complexity Scoring
 
 By default, complexity is scored using a keyword fallback. For more accurate scoring, you can run RouteLLM locally:
+
 ```bash
 pip install routellm
 python -m routellm.server --port 8500 --router mf
 ```
+
 IgniteRouter automatically detects and uses RouteLLM if it's running on `localhost:8500`. If it's not running, keyword scoring takes over with no error.
 
 ## Architecture: Source Files
 
-| File | What it does |
-|------|-------------|
-| src/proxy.ts | Intercepts all requests, orchestrates the full routing flow |
-| src/routing-engine.ts | Combines all routing pieces into one route() call |
-| src/task-classifier.ts | Classifies prompts into 6 task types |
-| src/complexity-scorer.ts | Scores complexity 0–1, maps to tier |
-| src/override-detector.ts | Detects /model commands and explicit model requests |
-| src/priority-selector.ts | Filters providers by capability, ranks by priority |
-| src/fallback-caller.ts | Calls models in order, handles failures |
-| src/provider-url-builder.ts | Builds correct upstream request per provider type |
-| src/user-providers.ts | Loads and validates provider config from openclaw.json |
-| src/provider.ts | Registers igniterouter/auto with OpenClaw |
+| File                        | What it does                                                |
+| --------------------------- | ----------------------------------------------------------- |
+| src/proxy.ts                | Intercepts all requests, orchestrates the full routing flow |
+| src/routing-engine.ts       | Combines all routing pieces into one route() call           |
+| src/task-classifier.ts      | Classifies prompts into 6 task types                        |
+| src/complexity-scorer.ts    | Scores complexity 0–1, maps to tier                         |
+| src/override-detector.ts    | Detects /model commands and explicit model requests         |
+| src/priority-selector.ts    | Filters providers by capability, ranks by priority          |
+| src/fallback-caller.ts      | Calls models in order, handles failures                     |
+| src/provider-url-builder.ts | Builds correct upstream request per provider type           |
+| src/user-providers.ts       | Loads and validates provider config from openclaw.json      |
+| src/provider.ts             | Registers igniterouter/auto with OpenClaw                   |
 
 ## Project Stats
-- 404 tests across 22 test files
+
+- 526 tests across 27 test files
 - 0 TypeScript errors
-- 10 source modules
-- 13 pre-loaded known models
+- 55+ pre-loaded known models
 - 6 task types
 - 4 complexity tiers
 - 7 provider types supported
@@ -383,7 +412,6 @@ OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE WORK OR THE USE OR OTH
 DEALINGS IN THE WORK.
 
 **Third-party components:**
+
 - ClawRouter by BlockRunAI — MIT License — https://github.com/BlockRunAI/ClawRouter
 - RouteLLM by LMSYS — Apache 2.0 — https://github.com/lm-sys/RouteLLM
-
-

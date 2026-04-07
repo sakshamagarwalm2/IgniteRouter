@@ -2,6 +2,7 @@ export enum ComplexityTier {
   Simple = "SIMPLE",
   Medium = "MEDIUM",
   Complex = "COMPLEX",
+  Reasoning = "REASONING",
   Expert = "EXPERT",
 }
 
@@ -14,9 +15,9 @@ export interface ComplexityResult {
 
 export function scoreToTier(score: number): ComplexityTier {
   if (score < 0.3) return ComplexityTier.Simple;
-  if (score < 0.6) return ComplexityTier.Medium;
-  if (score < 0.85) return ComplexityTier.Complex;
-  return ComplexityTier.Expert;
+  if (score < 0.5) return ComplexityTier.Medium;
+  if (score < 0.7) return ComplexityTier.Complex;
+  return ComplexityTier.Reasoning;
 }
 
 export async function isRouteLLMAvailable(timeoutMs = 1000): Promise<boolean> {

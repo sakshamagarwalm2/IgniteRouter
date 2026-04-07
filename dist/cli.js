@@ -26963,9 +26963,9 @@ function classifyTask(messages, tools, estimatedTokens) {
 // src/complexity-scorer.ts
 function scoreToTier(score) {
   if (score < 0.3) return "SIMPLE" /* Simple */;
-  if (score < 0.6) return "MEDIUM" /* Medium */;
-  if (score < 0.85) return "COMPLEX" /* Complex */;
-  return "EXPERT" /* Expert */;
+  if (score < 0.5) return "MEDIUM" /* Medium */;
+  if (score < 0.7) return "COMPLEX" /* Complex */;
+  return "REASONING" /* Reasoning */;
 }
 function countMatches(text, patterns, maxCount) {
   let count = 0;
@@ -31990,6 +31990,18 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
           providers: igniteCfg.providers.map((p) => ({ id: p.id, tools: p.supportsTools }))
         });
         const igniteDecision = await route2(routingContext, igniteCfg);
+        proxyLog.info("=== TIER ROUTING DECISION ===", {
+          tier: igniteDecision.tier,
+          model: igniteDecision.candidateProviders[0]?.id ?? "none",
+          taskType: igniteDecision.taskType,
+          complexityScore: igniteDecision.complexityScore?.toFixed(2),
+          candidateCount: igniteDecision.candidateProviders.length,
+          candidates: igniteDecision.candidateProviders.slice(0, 3).map((p) => ({
+            id: p.id,
+            tier: p.tier,
+            providerName: p.providerName
+          }))
+        });
         if (igniteDecision.error) {
           proxyLog.error("Routing failed \u2014 no candidates available", {
             error: igniteDecision.error
@@ -32043,9 +32055,25 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
           (provider) => buildRequestInit(provider),
           { timeoutMs: options.requestTimeoutMs ?? 3e4, retryableOnly: false }
         );
+        const firstCandidate = igniteCandidates[0]?.provider;
+        proxyLog.info("=== CALLING PROVIDER ===", {
+          model: firstCandidate?.id ?? "none",
+          providerName: firstCandidate?.providerName ?? "unknown",
+          baseUrl: firstCandidate?.baseUrl ?? "unknown",
+          tier: firstCandidate?.tier ?? "unknown",
+          candidateCount: igniteCandidates.length
+        });
         if (!fallbackResult.success) {
-          proxyLog.error("All providers failed", {
-            tried: fallbackResult.attempts.map((a) => a.provider.id)
+          proxyLog.error("=== ALL PROVIDERS FAILED ===", {
+            tier: igniteDecision.tier,
+            attempts: fallbackResult.attempts.map((a) => ({
+              model: a.provider.id,
+              success: a.success,
+              reason: a.failureReason,
+              status: a.statusCode,
+              error: a.errorMessage?.substring(0, 100),
+              latencyMs: a.latencyMs
+            }))
           });
           res.writeHead(503, { "Content-Type": "application/json" });
           res.end(

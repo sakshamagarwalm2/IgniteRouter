@@ -1,5 +1,5 @@
 import { RankedCandidate } from "./priority-selector.js";
-import { UserProvider } from "./user-providers.js";
+import { IgniteProvider } from "./openclaw-providers.js";
 import { fallbackLog } from "./logger.js";
 
 export type FailureReason =
@@ -13,7 +13,7 @@ export type FailureReason =
   | "unknown";
 
 export interface AttemptResult {
-  provider: UserProvider;
+  provider: IgniteProvider;
   success: boolean;
   failureReason?: FailureReason;
   statusCode?: number;
@@ -26,7 +26,7 @@ export interface FallbackResult {
   attempts: AttemptResult[];
   finalResponse?: Response;
   errorSummary?: string;
-  usedProvider?: UserProvider;
+  usedProvider?: IgniteProvider;
 }
 
 export interface FallbackOptions {
@@ -52,7 +52,7 @@ export function classifyHttpError(status: number, body?: string): FailureReason 
 
 export async function callWithFallback(
   candidates: RankedCandidate[],
-  buildRequest: (provider: UserProvider) => { url: string; init: RequestInit },
+  buildRequest: (provider: IgniteProvider) => { url: string; init: RequestInit },
   options?: Partial<FallbackOptions>,
 ): Promise<FallbackResult> {
   const timeoutMs = options?.timeoutMs ?? 30000;

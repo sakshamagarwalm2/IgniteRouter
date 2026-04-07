@@ -27866,9 +27866,9 @@ function classifyTask(messages, tools, estimatedTokens) {
 // src/complexity-scorer.ts
 function scoreToTier(score) {
   if (score < 0.3) return "SIMPLE" /* Simple */;
-  if (score < 0.6) return "MEDIUM" /* Medium */;
-  if (score < 0.85) return "COMPLEX" /* Complex */;
-  return "EXPERT" /* Expert */;
+  if (score < 0.5) return "MEDIUM" /* Medium */;
+  if (score < 0.7) return "COMPLEX" /* Complex */;
+  return "REASONING" /* Reasoning */;
 }
 function countMatches(text, patterns, maxCount) {
   let count = 0;
@@ -32080,6 +32080,18 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
           providers: igniteCfg.providers.map((p) => ({ id: p.id, tools: p.supportsTools }))
         });
         const igniteDecision = await route2(routingContext, igniteCfg);
+        proxyLog.info("=== TIER ROUTING DECISION ===", {
+          tier: igniteDecision.tier,
+          model: igniteDecision.candidateProviders[0]?.id ?? "none",
+          taskType: igniteDecision.taskType,
+          complexityScore: igniteDecision.complexityScore?.toFixed(2),
+          candidateCount: igniteDecision.candidateProviders.length,
+          candidates: igniteDecision.candidateProviders.slice(0, 3).map((p) => ({
+            id: p.id,
+            tier: p.tier,
+            providerName: p.providerName
+          }))
+        });
         if (igniteDecision.error) {
           proxyLog.error("Routing failed \u2014 no candidates available", {
             error: igniteDecision.error
@@ -32133,9 +32145,25 @@ async function proxyRequest(req, res, apiBase, options, routerOpts, deduplicator
           (provider) => buildRequestInit(provider),
           { timeoutMs: options.requestTimeoutMs ?? 3e4, retryableOnly: false }
         );
+        const firstCandidate = igniteCandidates[0]?.provider;
+        proxyLog.info("=== CALLING PROVIDER ===", {
+          model: firstCandidate?.id ?? "none",
+          providerName: firstCandidate?.providerName ?? "unknown",
+          baseUrl: firstCandidate?.baseUrl ?? "unknown",
+          tier: firstCandidate?.tier ?? "unknown",
+          candidateCount: igniteCandidates.length
+        });
         if (!fallbackResult.success) {
-          proxyLog.error("All providers failed", {
-            tried: fallbackResult.attempts.map((a) => a.provider.id)
+          proxyLog.error("=== ALL PROVIDERS FAILED ===", {
+            tier: igniteDecision.tier,
+            attempts: fallbackResult.attempts.map((a) => ({
+              model: a.provider.id,
+              success: a.success,
+              reason: a.failureReason,
+              status: a.statusCode,
+              error: a.errorMessage?.substring(0, 100),
+              latencyMs: a.latencyMs
+            }))
           });
           res.writeHead(503, { "Content-Type": "application/json" });
           res.end(
@@ -33797,6 +33825,281 @@ data: [DONE]
   }
 }
 
+// src/openclaw-providers.ts
+var DEFAULT_PROVIDER = {
+  tier: "MEDIUM" /* Medium */,
+  contextWindow: 128e3,
+  supportsVision: false,
+  supportsTools: true,
+  supportsStreaming: true,
+  inputPricePerMToken: 1,
+  outputPricePerMToken: 1,
+  avgLatencyMs: 1e3,
+  specialisedFor: [],
+  avoidFor: [],
+  priorityForTasks: {}
+};
+function inferTierFromCost(cost) {
+  if (!cost || cost.input === 0 && cost.output === 0) {
+    return "SIMPLE" /* Simple */;
+  }
+  const avgPrice = (cost.input + cost.output) / 2;
+  if (avgPrice < 0.5) return "SIMPLE" /* Simple */;
+  if (avgPrice < 1.5) return "MEDIUM" /* Medium */;
+  if (avgPrice < 3) return "COMPLEX" /* Complex */;
+  return "REASONING" /* Reasoning */;
+}
+var EXPLICIT_TIER_MAP = {
+  "deepseek/deepseek-chat": "MEDIUM" /* Medium */,
+  "deepseek/deepseek-reasoner": "REASONING" /* Reasoning */,
+  "xiaomi/mimo-v2-flash": "SIMPLE" /* Simple */,
+  "xiaomi/mimo-v2-pro": "REASONING" /* Reasoning */,
+  "xiaomi/mimo-v2-omni": "REASONING" /* Reasoning */,
+  "mistral/mistral-large-latest": "COMPLEX" /* Complex */
+};
+function getExplicitTier(providerName, modelId) {
+  const key = `${providerName}/${modelId}`;
+  return EXPLICIT_TIER_MAP[key] ?? null;
+}
+function inferSupportsVision(model) {
+  return model.input?.includes("image") ?? false;
+}
+function inferSupportsTools(model) {
+  if (model.compat && typeof model.compat === "object") {
+    const compat = model.compat;
+    if ("supportsTools" in compat) {
+      return compat.supportsTools === true;
+    }
+  }
+  if (model.input?.includes("text")) return true;
+  return true;
+}
+function loadProvidersFromOpenClaw(openclawProviders, logger2) {
+  const log = logger2 ?? configLog;
+  if (!openclawProviders || Object.keys(openclawProviders).length === 0) {
+    log.info("No OpenClaw providers found, using default fallback");
+    return getDefaultProviders();
+  }
+  const providers = [];
+  for (const [providerName, providerConfig] of Object.entries(openclawProviders)) {
+    if (providerName === "ignite" || providerName === "igniterouter") {
+      continue;
+    }
+    if (!providerConfig.models || !Array.isArray(providerConfig.models)) {
+      continue;
+    }
+    for (const model of providerConfig.models) {
+      const explicitTier = getExplicitTier(providerName, model.id);
+      const tier = explicitTier ?? inferTierFromCost(model.cost);
+      providers.push({
+        id: `${providerName}/${model.id}`,
+        providerName,
+        baseUrl: providerConfig.baseUrl,
+        apiKey: providerConfig.apiKey,
+        isLocal: false,
+        tier,
+        contextWindow: model.contextWindow ?? 128e3,
+        supportsVision: inferSupportsVision(model),
+        supportsTools: inferSupportsTools(model),
+        supportsStreaming: true,
+        inputPricePerMToken: model.cost?.input ?? 1,
+        outputPricePerMToken: model.cost?.output ?? 1,
+        avgLatencyMs: 1e3,
+        specialisedFor: [],
+        avoidFor: [],
+        priorityForTasks: {}
+      });
+    }
+  }
+  log.info("Providers loaded from OpenClaw", {
+    count: providers.length,
+    providers: Object.keys(openclawProviders)
+  });
+  return providers;
+}
+function getDefaultProviders() {
+  const defaults = [
+    {
+      id: "google/gemini-2.5-flash",
+      providerName: "google",
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+      isLocal: false,
+      tier: "SIMPLE" /* Simple */,
+      contextWindow: 1e6,
+      supportsVision: true,
+      supportsTools: true,
+      supportsStreaming: true,
+      inputPricePerMToken: 0.15,
+      outputPricePerMToken: 0.6,
+      avgLatencyMs: 1200,
+      specialisedFor: [],
+      avoidFor: [],
+      priorityForTasks: {}
+    },
+    {
+      id: "google/gemini-2.5-pro",
+      providerName: "google",
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+      isLocal: false,
+      tier: "COMPLEX" /* Complex */,
+      contextWindow: 1e6,
+      supportsVision: true,
+      supportsTools: true,
+      supportsStreaming: true,
+      inputPricePerMToken: 1.25,
+      outputPricePerMToken: 10,
+      avgLatencyMs: 1500,
+      specialisedFor: [],
+      avoidFor: [],
+      priorityForTasks: {}
+    },
+    {
+      id: "deepseek/deepseek-chat",
+      providerName: "deepseek",
+      baseUrl: "https://api.deepseek.com/v1",
+      isLocal: false,
+      tier: "MEDIUM" /* Medium */,
+      contextWindow: 128e3,
+      supportsVision: false,
+      supportsTools: true,
+      supportsStreaming: true,
+      inputPricePerMToken: 0.14,
+      outputPricePerMToken: 0.28,
+      avgLatencyMs: 1400,
+      specialisedFor: [],
+      avoidFor: [],
+      priorityForTasks: {}
+    },
+    {
+      id: "deepseek/deepseek-reasoner",
+      providerName: "deepseek",
+      baseUrl: "https://api.deepseek.com/v1",
+      isLocal: false,
+      tier: "REASONING" /* Reasoning */,
+      contextWindow: 128e3,
+      supportsVision: false,
+      supportsTools: false,
+      supportsStreaming: true,
+      inputPricePerMToken: 0.55,
+      outputPricePerMToken: 2.19,
+      avgLatencyMs: 1500,
+      specialisedFor: [],
+      avoidFor: [],
+      priorityForTasks: {}
+    },
+    {
+      id: "openai/gpt-4o-mini",
+      providerName: "openai",
+      baseUrl: "https://api.openai.com/v1",
+      isLocal: false,
+      tier: "SIMPLE" /* Simple */,
+      contextWindow: 128e3,
+      supportsVision: true,
+      supportsTools: true,
+      supportsStreaming: true,
+      inputPricePerMToken: 0.15,
+      outputPricePerMToken: 0.6,
+      avgLatencyMs: 800,
+      specialisedFor: [],
+      avoidFor: [],
+      priorityForTasks: {}
+    },
+    {
+      id: "openai/gpt-4o",
+      providerName: "openai",
+      baseUrl: "https://api.openai.com/v1",
+      isLocal: false,
+      tier: "COMPLEX" /* Complex */,
+      contextWindow: 128e3,
+      supportsVision: true,
+      supportsTools: true,
+      supportsStreaming: true,
+      inputPricePerMToken: 2.5,
+      outputPricePerMToken: 10,
+      avgLatencyMs: 1200,
+      specialisedFor: [],
+      avoidFor: [],
+      priorityForTasks: {}
+    },
+    {
+      id: "anthropic/claude-haiku-4.5",
+      providerName: "anthropic",
+      baseUrl: "https://api.anthropic.com/v1",
+      isLocal: false,
+      tier: "MEDIUM" /* Medium */,
+      contextWindow: 2e5,
+      supportsVision: true,
+      supportsTools: true,
+      supportsStreaming: true,
+      inputPricePerMToken: 0.8,
+      outputPricePerMToken: 4,
+      avgLatencyMs: 1500,
+      specialisedFor: [],
+      avoidFor: [],
+      priorityForTasks: {}
+    },
+    {
+      id: "anthropic/claude-sonnet-4.6",
+      providerName: "anthropic",
+      baseUrl: "https://api.anthropic.com/v1",
+      isLocal: false,
+      tier: "COMPLEX" /* Complex */,
+      contextWindow: 2e5,
+      supportsVision: true,
+      supportsTools: true,
+      supportsStreaming: true,
+      inputPricePerMToken: 3,
+      outputPricePerMToken: 15,
+      avgLatencyMs: 2e3,
+      specialisedFor: [],
+      avoidFor: [],
+      priorityForTasks: {}
+    },
+    {
+      id: "anthropic/claude-opus-4.6",
+      providerName: "anthropic",
+      baseUrl: "https://api.anthropic.com/v1",
+      isLocal: false,
+      tier: "REASONING" /* Reasoning */,
+      contextWindow: 2e5,
+      supportsVision: true,
+      supportsTools: true,
+      supportsStreaming: true,
+      inputPricePerMToken: 15,
+      outputPricePerMToken: 75,
+      avgLatencyMs: 2500,
+      specialisedFor: [],
+      avoidFor: [],
+      priorityForTasks: {}
+    },
+    {
+      id: "xai/grok-3",
+      providerName: "xai",
+      baseUrl: "https://api.x.ai/v1",
+      isLocal: false,
+      tier: "COMPLEX" /* Complex */,
+      contextWindow: 131072,
+      supportsVision: true,
+      supportsTools: true,
+      supportsStreaming: true,
+      inputPricePerMToken: 3,
+      outputPricePerMToken: 15,
+      avgLatencyMs: 1500,
+      specialisedFor: [],
+      avoidFor: [],
+      priorityForTasks: {}
+    }
+  ];
+  return defaults;
+}
+var DEFAULT_PROVIDER_PRIORITY = "cost";
+function createIgniteConfig(providers, priority = DEFAULT_PROVIDER_PRIORITY) {
+  return {
+    defaultPriority: priority,
+    providers
+  };
+}
+
 // src/index.ts
 import {
   writeFileSync as writeFileSync2,
@@ -34110,260 +34413,6 @@ function buildTool(service, proxyBaseUrl) {
 }
 function buildPartnerTools(proxyBaseUrl) {
   return PARTNER_SERVICES.map((service) => buildTool(service, proxyBaseUrl));
-}
-
-// src/user-providers.ts
-var DEFAULT_PROVIDER = {
-  isLocal: false,
-  tier: "MEDIUM" /* Medium */,
-  contextWindow: 128e3,
-  supportsVision: false,
-  supportsTools: true,
-  supportsStreaming: true,
-  inputPricePerMToken: 1,
-  outputPricePerMToken: 1,
-  avgLatencyMs: 1e3,
-  specialisedFor: [],
-  avoidFor: [],
-  priorityForTasks: {}
-};
-var KNOWN_MODELS = /* @__PURE__ */ new Map([
-  [
-    "openai/gpt-4o",
-    {
-      contextWindow: 128e3,
-      supportsVision: true,
-      supportsTools: true,
-      inputPricePerMToken: 2.5,
-      outputPricePerMToken: 10,
-      avgLatencyMs: 800
-    }
-  ],
-  [
-    "openai/gpt-4o-mini",
-    {
-      contextWindow: 128e3,
-      supportsVision: true,
-      supportsTools: true,
-      inputPricePerMToken: 0.15,
-      outputPricePerMToken: 0.6,
-      avgLatencyMs: 400
-    }
-  ],
-  [
-    "openai/o3",
-    {
-      contextWindow: 2e5,
-      supportsVision: false,
-      supportsTools: true,
-      inputPricePerMToken: 2,
-      outputPricePerMToken: 8,
-      avgLatencyMs: 2e3
-    }
-  ],
-  [
-    "openai/o4-mini",
-    {
-      contextWindow: 128e3,
-      supportsVision: false,
-      supportsTools: true,
-      inputPricePerMToken: 1.1,
-      outputPricePerMToken: 4.4,
-      avgLatencyMs: 1200
-    }
-  ],
-  [
-    "anthropic/claude-opus-4",
-    {
-      contextWindow: 2e5,
-      supportsVision: true,
-      supportsTools: true,
-      inputPricePerMToken: 15,
-      outputPricePerMToken: 75,
-      avgLatencyMs: 1500
-    }
-  ],
-  [
-    "anthropic/claude-sonnet-4",
-    {
-      contextWindow: 2e5,
-      supportsVision: true,
-      supportsTools: true,
-      inputPricePerMToken: 3,
-      outputPricePerMToken: 15,
-      avgLatencyMs: 900
-    }
-  ],
-  [
-    "anthropic/claude-haiku-4",
-    {
-      contextWindow: 2e5,
-      supportsVision: true,
-      supportsTools: true,
-      inputPricePerMToken: 0.8,
-      outputPricePerMToken: 4,
-      avgLatencyMs: 400
-    }
-  ],
-  [
-    "google/gemini-2.5-pro",
-    {
-      contextWindow: 1e6,
-      supportsVision: true,
-      supportsTools: true,
-      inputPricePerMToken: 1.25,
-      outputPricePerMToken: 10,
-      avgLatencyMs: 1200
-    }
-  ],
-  [
-    "google/gemini-2.5-flash",
-    {
-      contextWindow: 1e6,
-      supportsVision: true,
-      supportsTools: true,
-      inputPricePerMToken: 0.15,
-      outputPricePerMToken: 0.6,
-      avgLatencyMs: 400
-    }
-  ],
-  [
-    "google/gemini-2.5-flash-lite",
-    {
-      contextWindow: 1e6,
-      supportsVision: true,
-      supportsTools: true,
-      inputPricePerMToken: 0.1,
-      outputPricePerMToken: 0.4,
-      avgLatencyMs: 300
-    }
-  ],
-  [
-    "deepseek/deepseek-chat",
-    {
-      contextWindow: 128e3,
-      supportsVision: false,
-      supportsTools: true,
-      inputPricePerMToken: 0.14,
-      outputPricePerMToken: 0.28,
-      avgLatencyMs: 600
-    }
-  ],
-  [
-    "deepseek/deepseek-reasoner",
-    {
-      contextWindow: 128e3,
-      supportsVision: false,
-      supportsTools: false,
-      inputPricePerMToken: 0.55,
-      outputPricePerMToken: 2.19,
-      avgLatencyMs: 2e3
-    }
-  ],
-  [
-    "openrouter/auto",
-    {
-      contextWindow: 2e5,
-      supportsVision: true,
-      supportsTools: true,
-      inputPricePerMToken: 3,
-      outputPricePerMToken: 15,
-      avgLatencyMs: 1e3
-    }
-  ]
-]);
-function mergeProvider(id, provided) {
-  const baseDefaults = {
-    id,
-    isLocal: false,
-    tier: "MEDIUM" /* Medium */,
-    contextWindow: 128e3,
-    supportsVision: false,
-    supportsTools: true,
-    supportsStreaming: true,
-    inputPricePerMToken: 1,
-    outputPricePerMToken: 1,
-    avgLatencyMs: 1e3,
-    specialisedFor: [],
-    avoidFor: [],
-    priorityForTasks: {}
-  };
-  let tierValue = "MEDIUM" /* Medium */;
-  if (typeof provided.tier === "string") {
-    const tierStr = provided.tier.toUpperCase();
-    if (tierStr === "SIMPLE") tierValue = "SIMPLE" /* Simple */;
-    else if (tierStr === "MEDIUM") tierValue = "MEDIUM" /* Medium */;
-    else if (tierStr === "COMPLEX") tierValue = "COMPLEX" /* Complex */;
-    else if (tierStr === "EXPERT") tierValue = "EXPERT" /* Expert */;
-  } else if (provided.tier) {
-    tierValue = provided.tier;
-  }
-  if (id.startsWith("ollama/")) {
-    return {
-      ...baseDefaults,
-      isLocal: true,
-      apiKey: void 0,
-      inputPricePerMToken: 0,
-      outputPricePerMToken: 0,
-      avgLatencyMs: 500,
-      ...provided,
-      tier: tierValue
-    };
-  }
-  const knownDefaults = KNOWN_MODELS.get(id);
-  if (knownDefaults) {
-    configLog.debug("Provider metadata from registry", {
-      id,
-      contextWindow: knownDefaults.contextWindow,
-      inputPrice: knownDefaults.inputPricePerMToken
-    });
-  }
-  return {
-    ...baseDefaults,
-    ...knownDefaults ?? {},
-    ...provided,
-    id,
-    tier: tierValue,
-    // Ensure boolean flags default to true if not explicitly false
-    supportsStreaming: provided.supportsStreaming ?? (knownDefaults?.supportsStreaming ?? true),
-    supportsTools: provided.supportsTools ?? (knownDefaults?.supportsTools ?? true),
-    // Context window and prices also need safe fallbacks from registry
-    contextWindow: provided.contextWindow ?? (knownDefaults?.contextWindow ?? baseDefaults.contextWindow),
-    inputPricePerMToken: provided.inputPricePerMToken ?? (knownDefaults?.inputPricePerMToken ?? baseDefaults.inputPricePerMToken),
-    outputPricePerMToken: provided.outputPricePerMToken ?? (knownDefaults?.outputPricePerMToken ?? baseDefaults.outputPricePerMToken)
-  };
-}
-function loadProviders(rawConfig) {
-  const config = rawConfig;
-  if (!config || typeof config !== "object") {
-    return { defaultPriority: "cost", providers: [] };
-  }
-  const defaultPriority = config.defaultPriority ?? "cost";
-  const providers = [];
-  if (Array.isArray(config.providers)) {
-    for (const entry of config.providers) {
-      if (!entry || typeof entry !== "object") {
-        console.warn("[IgniteRouter] Skipping invalid provider entry: not an object");
-        continue;
-      }
-      const prov = entry;
-      if (typeof prov.id !== "string" || !prov.id.trim()) {
-        console.warn("[IgniteRouter] Skipping provider entry with missing or empty id");
-        continue;
-      }
-      try {
-        const merged = mergeProvider(prov.id, prov);
-        providers.push(merged);
-      } catch (err) {
-        configLog.warn("Skipping invalid provider", {
-          id: prov.id,
-          reason: err instanceof Error ? err.message : String(err)
-        });
-      }
-    }
-  }
-  configLog.info("Providers loaded", { count: providers.length, priority: defaultPriority });
-  return { defaultPriority, providers };
 }
 
 // src/retry.ts
@@ -34751,14 +34800,15 @@ async function startProxyInBackground(api) {
   const nestedConfig = api.pluginConfig?.igniterouter?.config || api.pluginConfig?.igniterouter;
   const finalConfig = nestedConfig || directConfig;
   const routingConfig = finalConfig?.routing;
-  let rawProviders = finalConfig?.providers;
+  const defaultPriority = finalConfig?.defaultPriority || "cost";
+  const openclawProviders = api.config.models?.providers;
   api.logger.info(
-    `DEBUG: rawProviders = ${rawProviders ? JSON.stringify(rawProviders).substring(0, 100) + "..." : "undefined"}`
+    `DEBUG: OpenClaw providers = ${openclawProviders ? Object.keys(openclawProviders).join(", ") : "none"}`
   );
-  const igniteConfig = rawProviders && rawProviders.length > 0 ? {
-    defaultPriority: finalConfig?.defaultPriority || "cost",
-    providers: rawProviders
-  } : void 0;
+  const providers = loadProvidersFromOpenClaw(
+    openclawProviders
+  );
+  const igniteConfig = createIgniteConfig(providers, defaultPriority);
   if (activeProxyHandle && !igniteConfig?.providers?.length) {
     api.logger.info("Proxy already running without new providers, reusing existing instance");
     setActiveProxy(activeProxyHandle);
@@ -35079,7 +35129,7 @@ export {
   igniteProvider,
   isAgenticModel,
   isRetryable,
-  loadProviders,
+  loadProvidersFromOpenClaw as loadProviders,
   logUsage,
   resolveModelAlias,
   route,

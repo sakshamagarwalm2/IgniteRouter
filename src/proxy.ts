@@ -41,7 +41,12 @@ import {
 } from "./router/index.js";
 import { route as igniteRoute, type RoutingContext } from "./routing-engine.js";
 import { callWithFallback, type FallbackResult } from "./fallback-caller.js";
-import { loadProviders, type IgniteConfig, type UserProvider } from "./user-providers.js";
+import {
+  loadProvidersFromOpenClaw,
+  createIgniteConfig,
+  type IgniteConfig,
+  type IgniteProvider,
+} from "./openclaw-providers.js";
 import { classifyByRules } from "./router/rules.js";
 import {
   IgniteRouter_MODELS,
@@ -2422,6 +2427,19 @@ async function proxyRequest(
 
         const igniteDecision = await igniteRoute(routingContext, igniteCfg);
 
+        proxyLog.info("=== TIER ROUTING DECISION ===", {
+          tier: igniteDecision.tier,
+          model: igniteDecision.candidateProviders[0]?.id ?? "none",
+          taskType: igniteDecision.taskType,
+          complexityScore: igniteDecision.complexityScore?.toFixed(2),
+          candidateCount: igniteDecision.candidateProviders.length,
+          candidates: igniteDecision.candidateProviders.slice(0, 3).map((p) => ({
+            id: p.id,
+            tier: p.tier,
+            providerName: p.providerName,
+          })),
+        });
+
         if (igniteDecision.error) {
           proxyLog.error("Routing failed — no candidates available", {
             error: igniteDecision.error,
@@ -2441,7 +2459,7 @@ async function proxyRequest(
           reasons: [] as string[],
         }));
 
-        const buildRequestInit = (provider: UserProvider): { url: string; init: RequestInit } => {
+        const buildRequestInit = (provider: IgniteProvider): { url: string; init: RequestInit } => {
           const originalBody = JSON.parse(body.toString());
           const normalizedBody = normalizeRequestForModel(originalBody, provider.id);
 
@@ -2491,9 +2509,27 @@ async function proxyRequest(
           { timeoutMs: options.requestTimeoutMs ?? 30000, retryableOnly: false },
         );
 
+        // Log which model we're attempting to call (first in the candidate list)
+        const firstCandidate = igniteCandidates[0]?.provider;
+        proxyLog.info("=== CALLING PROVIDER ===", {
+          model: firstCandidate?.id ?? "none",
+          providerName: firstCandidate?.providerName ?? "unknown",
+          baseUrl: firstCandidate?.baseUrl ?? "unknown",
+          tier: firstCandidate?.tier ?? "unknown",
+          candidateCount: igniteCandidates.length,
+        });
+
         if (!fallbackResult.success) {
-          proxyLog.error("All providers failed", {
-            tried: fallbackResult.attempts.map((a) => a.provider.id),
+          proxyLog.error("=== ALL PROVIDERS FAILED ===", {
+            tier: igniteDecision.tier,
+            attempts: fallbackResult.attempts.map((a) => ({
+              model: a.provider.id,
+              success: a.success,
+              reason: a.failureReason,
+              status: a.statusCode,
+              error: a.errorMessage?.substring(0, 100),
+              latencyMs: a.latencyMs,
+            })),
           });
           res.writeHead(503, { "Content-Type": "application/json" });
           res.end(
@@ -2519,7 +2555,7 @@ async function proxyRequest(
             }
           });
 
-          const usedProvider = fallbackResult.usedProvider as UserProvider;
+          const usedProvider = fallbackResult.usedProvider as IgniteProvider;
           const selectedModel = usedProvider.id;
 
           proxyLog.info("Request completed", {

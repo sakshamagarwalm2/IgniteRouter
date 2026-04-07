@@ -325,6 +325,14 @@ declare const DEFAULT_ROUTING_CONFIG: RoutingConfig;
  */
 declare function route(prompt: string, systemPrompt: string | undefined, maxOutputTokens: number, options: RouterOptions): RoutingDecision;
 
+declare enum ComplexityTier {
+    Simple = "SIMPLE",
+    Medium = "MEDIUM",
+    Complex = "COMPLEX",
+    Reasoning = "REASONING",
+    Expert = "EXPERT"
+}
+
 declare enum TaskType {
     Chat = "chat",
     Creative = "creative",
@@ -343,17 +351,34 @@ declare function classifyTask(messages: Array<{
     content: unknown;
 }>, tools?: unknown[], estimatedTokens?: number): ClassificationResult;
 
-declare enum ComplexityTier {
-    Simple = "SIMPLE",
-    Medium = "MEDIUM",
-    Complex = "COMPLEX",
-    Expert = "EXPERT"
-}
-
-interface UserProvider {
+interface OpenClawModel {
     id: string;
+    name: string;
+    reasoning?: boolean;
+    input?: string[];
+    output?: string[];
+    cost?: {
+        input: number;
+        output: number;
+        cacheRead?: number;
+        cacheWrite?: number;
+    };
+    contextWindow?: number;
+    maxTokens?: number;
+    compat?: Record<string, unknown>;
+    api?: string;
+}
+interface OpenClawProvider {
+    baseUrl: string;
+    api: string;
     apiKey?: string;
-    baseUrl?: string;
+    models: OpenClawModel[];
+}
+interface IgniteProvider {
+    id: string;
+    providerName: string;
+    baseUrl: string;
+    apiKey?: string;
     isLocal: boolean;
     tier: ComplexityTier;
     contextWindow: number;
@@ -370,9 +395,12 @@ interface UserProvider {
 type ProviderPriority = "cost" | "speed" | "quality";
 interface IgniteConfig {
     defaultPriority: ProviderPriority;
-    providers: UserProvider[];
+    providers: IgniteProvider[];
 }
-declare function loadProviders(rawConfig: unknown): IgniteConfig;
+declare function loadProvidersFromOpenClaw(openclawProviders: Record<string, OpenClawProvider> | undefined, logger?: {
+    info: (msg: string, ctx?: Record<string, unknown>) => void;
+    debug?: (msg: string, ctx?: Record<string, unknown>) => void;
+}): IgniteProvider[];
 
 /**
  * Response Cache for LLM Completions
@@ -922,9 +950,9 @@ interface UpstreamRequest {
     headers: Record<string, string>;
     body: unknown;
 }
-declare function getProviderBaseUrl(provider: UserProvider): string;
-declare function getProviderAuthHeaders(provider: UserProvider): Record<string, string>;
-declare function buildUpstreamRequest(provider: UserProvider, openAiBody: Record<string, any>): UpstreamRequest;
+declare function getProviderBaseUrl(provider: IgniteProvider): string;
+declare function getProviderAuthHeaders(provider: IgniteProvider): Record<string, string>;
+declare function buildUpstreamRequest(provider: IgniteProvider, openAiBody: Record<string, any>): UpstreamRequest;
 
 /**
  * @igniterouter/igniterouter
@@ -945,4 +973,4 @@ declare function buildUpstreamRequest(provider: UserProvider, openAiBody: Record
 
 declare const plugin: OpenClawPluginDefinition;
 
-export { type AggregatedStats, type CachedLLMResponse, type CachedResponse, DEFAULT_RETRY_CONFIG, DEFAULT_ROUTING_CONFIG, DEFAULT_SESSION_CONFIG, type DailyStats, IgniteRouter_MODELS, MODEL_ALIASES, OPENCLAW_MODELS, PARTNER_SERVICES, type PartnerServiceDefinition, type PartnerToolDefinition, type ProxyHandle, type ProxyOptions, RequestDeduplicator, ResponseCache, type ResponseCacheConfig, type RetryConfig, type RoutingConfig, type RoutingDecision, type SessionConfig, type SessionEntry, SessionStore, TaskType, type Tier, type UsageEntry, buildPartnerTools, buildProviderModels, buildUpstreamRequest, calculateModelCost, classifyByRules, classifyTask, clearStats, plugin as default, fetchWithRetry, formatStatsAscii, getAgenticModels, getFallbackChain, getFallbackChainFiltered, getModelContextWindow, getPartnerService, getProviderAuthHeaders, getProviderBaseUrl, getProxyPort, getSessionId, getStats, hashRequestContent, igniteProvider, isAgenticModel, isRetryable, loadProviders, logUsage, resolveModelAlias, route, startProxy };
+export { type AggregatedStats, type CachedLLMResponse, type CachedResponse, DEFAULT_RETRY_CONFIG, DEFAULT_ROUTING_CONFIG, DEFAULT_SESSION_CONFIG, type DailyStats, IgniteRouter_MODELS, MODEL_ALIASES, OPENCLAW_MODELS, PARTNER_SERVICES, type PartnerServiceDefinition, type PartnerToolDefinition, type ProxyHandle, type ProxyOptions, RequestDeduplicator, ResponseCache, type ResponseCacheConfig, type RetryConfig, type RoutingConfig, type RoutingDecision, type SessionConfig, type SessionEntry, SessionStore, TaskType, type Tier, type UsageEntry, buildPartnerTools, buildProviderModels, buildUpstreamRequest, calculateModelCost, classifyByRules, classifyTask, clearStats, plugin as default, fetchWithRetry, formatStatsAscii, getAgenticModels, getFallbackChain, getFallbackChainFiltered, getModelContextWindow, getPartnerService, getProviderAuthHeaders, getProviderBaseUrl, getProxyPort, getSessionId, getStats, hashRequestContent, igniteProvider, isAgenticModel, isRetryable, loadProvidersFromOpenClaw as loadProviders, logUsage, resolveModelAlias, route, startProxy };

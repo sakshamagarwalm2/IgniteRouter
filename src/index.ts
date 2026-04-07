@@ -24,11 +24,12 @@ import type {
 import { igniteProvider, setActiveProxy } from "./provider.js";
 import { startProxy, getProxyPort } from "./proxy.js";
 import {
-  loadProviders,
+  loadProvidersFromOpenClaw,
+  createIgniteConfig,
   type IgniteConfig,
+  type IgniteProvider,
   type ProviderPriority,
-  type UserProvider,
-} from "./user-providers.js";
+} from "./openclaw-providers.js";
 import type { RoutingConfig } from "./router/index.js";
 import {
   loadExcludeList,
@@ -433,24 +434,66 @@ async function startProxyInBackground(api: OpenClawPluginApi): Promise<void> {
 
   // OpenClaw plugin config can be flat or nested under plugin ID
   const directConfig = api.pluginConfig as Record<string, any> | undefined;
-  const nestedConfig = (api.pluginConfig?.igniterouter as Record<string, any>)?.config || api.pluginConfig?.igniterouter;
-  
+  const nestedConfig =
+    (api.pluginConfig?.igniterouter as Record<string, any>)?.config ||
+    api.pluginConfig?.igniterouter;
+
   const finalConfig = nestedConfig || directConfig;
 
   const routingConfig = finalConfig?.routing as Partial<RoutingConfig> | undefined;
-  let rawProviders = finalConfig?.providers as unknown[] | undefined;
+  const defaultPriority = (finalConfig?.defaultPriority || "cost") as ProviderPriority;
+
+  // Auto-discover providers from OpenClaw's model configuration
+  const openclawProviders = api.config.models?.providers as
+    | Record<
+        string,
+        {
+          baseUrl?: string;
+          api?: string;
+          apiKey?: string;
+          models?: Array<{
+            id: string;
+            name?: string;
+            reasoning?: boolean;
+            input?: string[];
+            output?: string[];
+            cost?: { input: number; output: number };
+            contextWindow?: number;
+            maxTokens?: number;
+          }>;
+        }
+      >
+    | undefined;
 
   api.logger.info(
-    `DEBUG: rawProviders = ${rawProviders ? JSON.stringify(rawProviders).substring(0, 100) + "..." : "undefined"}`,
+    `DEBUG: OpenClaw providers = ${openclawProviders ? Object.keys(openclawProviders).join(", ") : "none"}`,
   );
-  
-  const igniteConfig: IgniteConfig | undefined =
-    rawProviders && rawProviders.length > 0
-      ? {
-          defaultPriority: (finalConfig?.defaultPriority || "cost") as ProviderPriority,
-          providers: rawProviders as unknown as UserProvider[],
-        }
-      : undefined;
+
+  // Load providers from OpenClaw config or use defaults
+  const providers = loadProvidersFromOpenClaw(
+    openclawProviders as
+      | Record<
+          string,
+          {
+            baseUrl: string;
+            api: string;
+            apiKey?: string;
+            models: Array<{
+              id: string;
+              name: string;
+              reasoning?: boolean;
+              input?: string[];
+              output?: string[];
+              cost?: { input: number; output: number };
+              contextWindow?: number;
+              maxTokens?: number;
+            }>;
+          }
+        >
+      | undefined,
+  );
+
+  const igniteConfig: IgniteConfig = createIgniteConfig(providers, defaultPriority);
 
   if (activeProxyHandle && !igniteConfig?.providers?.length) {
     api.logger.info("Proxy already running without new providers, reusing existing instance");

@@ -95,6 +95,87 @@ X-IgniteRouter-Task: reasoning
 | ollama/         | ollama/llama3:8b        | http://localhost:11434 (default)  | None                  |
 | custom          | any/custom              | Your baseUrl                      | Optional Bearer       |
 
+## Auto-Discovery from OpenClaw Config
+
+**IgniteRouter automatically discovers LLM providers from your OpenClaw configuration (`~/.openclaw/openclaw.json`).** You don't need to manually configure providers in the plugin config anymore.
+
+### How It Works
+
+1. IgniteRouter reads `models.providers` from your OpenClaw config
+2. It automatically skips the "ignite" provider (your own proxy) to prevent infinite loops
+3. Each model is mapped to a tier based on explicit mapping or cost inference
+
+### Provider-to-Tier Mapping
+
+| Provider | Model                | Tier      | Notes                   |
+| -------- | -------------------- | --------- | ----------------------- |
+| deepseek | deepseek-chat        | MEDIUM    | General purpose chat    |
+| deepseek | deepseek-reasoner    | REASONING | Complex reasoning tasks |
+| xiaomi   | mimo-v2-flash        | SIMPLE    | Free, fast              |
+| xiaomi   | mimo-v2-pro          | REASONING | Free reasoning          |
+| xiaomi   | mimo-v2-omni         | REASONING | Free + vision           |
+| mistral  | mistral-large-latest | COMPLEX   | High-quality chat       |
+
+### Tier Inference from Cost (Fallback)
+
+If a model is not in the explicit mapping, tier is inferred from cost:
+
+| Cost Range      | Tier      |
+| --------------- | --------- |
+| FREE ($0/$0)    | SIMPLE    |
+| < $0.50/M       | SIMPLE    |
+| $0.50 - $1.50/M | MEDIUM    |
+| $1.50 - $3.00/M | COMPLEX   |
+| > $3.00/M       | REASONING |
+
+### Example OpenClaw Config
+
+In your `~/.openclaw/openclaw.json`, define providers under `models.providers`:
+
+```json
+{
+  "models": {
+    "providers": {
+      "deepseek": {
+        "baseUrl": "https://api.deepseek.com",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "deepseek-chat",
+            "name": "DeepSeek Chat",
+            "input": ["text"],
+            "contextWindow": 131072,
+            "cost": { "input": 0.28, "output": 0.42 }
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+IgniteRouter will automatically load `deepseek/deepseek-chat` with tier `MEDIUM`.
+
+### Disabling Auto-Discovery
+
+If you want to use manual provider config instead, set `autoDiscovery: false` in the plugin config:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "igniterouter": {
+        "enabled": true,
+        "config": {
+          "autoDiscovery": false,
+          "providers": [{ "id": "openai/gpt-4o-mini", "tier": "SIMPLE" }]
+        }
+      }
+    }
+  }
+}
+```
+
 ## Quick Start — Installing in OpenClaw
 
 **Step 1 — Install Node 20+ and OpenClaw (if not already):**

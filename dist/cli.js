@@ -26962,9 +26962,9 @@ function classifyTask(messages, tools, estimatedTokens) {
 
 // src/complexity-scorer.ts
 function scoreToTier(score) {
-  if (score < 0.3) return "SIMPLE" /* Simple */;
-  if (score < 0.5) return "MEDIUM" /* Medium */;
-  if (score < 0.7) return "COMPLEX" /* Complex */;
+  if (score < 0.2) return "SIMPLE" /* Simple */;
+  if (score < 0.4) return "MEDIUM" /* Medium */;
+  if (score < 0.55) return "COMPLEX" /* Complex */;
   return "REASONING" /* Reasoning */;
 }
 function countMatches(text, patterns, maxCount) {
@@ -26987,6 +26987,11 @@ function scoreViaKeywords(prompt) {
     /formally verify/i,
     /formal verification/i,
     /mathematical proof/i,
+    /derive/i,
+    /derivation/i,
+    /show that/i,
+    /verify that/i,
+    /demonstrate/i,
     /architect.*system/i,
     /architect.*distributed/i,
     /design.*system/i,
@@ -26999,15 +27004,21 @@ function scoreViaKeywords(prompt) {
     /np-hard/i,
     /big o analysis/i,
     /big-o analysis/i,
+    /algorithm.*complexity/i,
+    /optimize.*performance/i,
     /infinite primes/i,
     /infinite set/i,
     /postgresql/i,
     /sqlalchemy/i,
     /asyncio/i,
     /scrape.*websites/i,
-    /database.*design/i
+    /database.*design/i,
+    /compounding/i,
+    /interest.*formula/i,
+    /financial.*model/i,
+    /monte carlo/i
   ];
-  score += countMatches(lower, expertSignals, 3) * 0.35;
+  score += countMatches(lower, expertSignals, 4) * 0.35;
   const complexSignals = [
     /step by step/i,
     /explain in detail/i,
@@ -27032,9 +27043,19 @@ function scoreViaKeywords(prompt) {
     /evaluate/i,
     /evaluation/i,
     /multiple approaches/i,
-    /between .+ and .+/i
+    /between .+ and .+/i,
+    /build.*(react|component|app|application)/i,
+    /write.*(python|script|code|function|class)/i,
+    /create.*(api|database|schema|server)/i,
+    /design.*(database|schema|system)/i,
+    /develop.*(app|application|system)/i,
+    /program.*(in|to)/i,
+    /coding/i,
+    /code review/i,
+    /architecture/i,
+    /system design/i
   ];
-  score += countMatches(lower, complexSignals, 3) * 0.2;
+  score += countMatches(lower, complexSignals, 4) * 0.25;
   const mediumSignals = [
     /explain/i,
     /explanation/i,

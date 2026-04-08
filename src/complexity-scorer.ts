@@ -14,9 +14,9 @@ export interface ComplexityResult {
 }
 
 export function scoreToTier(score: number): ComplexityTier {
-  if (score < 0.3) return ComplexityTier.Simple;
-  if (score < 0.5) return ComplexityTier.Medium;
-  if (score < 0.7) return ComplexityTier.Complex;
+  if (score < 0.2) return ComplexityTier.Simple;
+  if (score < 0.4) return ComplexityTier.Medium;
+  if (score < 0.55) return ComplexityTier.Complex;
   return ComplexityTier.Reasoning;
 }
 
@@ -64,6 +64,11 @@ function scoreViaKeywords(prompt: string): number {
     /formally verify/i,
     /formal verification/i,
     /mathematical proof/i,
+    /derive/i,
+    /derivation/i,
+    /show that/i,
+    /verify that/i,
+    /demonstrate/i,
     /architect.*system/i,
     /architect.*distributed/i,
     /design.*system/i,
@@ -76,6 +81,8 @@ function scoreViaKeywords(prompt: string): number {
     /np-hard/i,
     /big o analysis/i,
     /big-o analysis/i,
+    /algorithm.*complexity/i,
+    /optimize.*performance/i,
     /infinite primes/i,
     /infinite set/i,
     /postgresql/i,
@@ -83,8 +90,12 @@ function scoreViaKeywords(prompt: string): number {
     /asyncio/i,
     /scrape.*websites/i,
     /database.*design/i,
+    /compounding/i,
+    /interest.*formula/i,
+    /financial.*model/i,
+    /monte carlo/i,
   ];
-  score += countMatches(lower, expertSignals, 3) * 0.35;
+  score += countMatches(lower, expertSignals, 4) * 0.35;
 
   const complexSignals = [
     /step by step/i,
@@ -111,8 +122,18 @@ function scoreViaKeywords(prompt: string): number {
     /evaluation/i,
     /multiple approaches/i,
     /between .+ and .+/i,
+    /build.*(react|component|app|application)/i,
+    /write.*(python|script|code|function|class)/i,
+    /create.*(api|database|schema|server)/i,
+    /design.*(database|schema|system)/i,
+    /develop.*(app|application|system)/i,
+    /program.*(in|to)/i,
+    /coding/i,
+    /code review/i,
+    /architecture/i,
+    /system design/i,
   ];
-  score += countMatches(lower, complexSignals, 3) * 0.2;
+  score += countMatches(lower, complexSignals, 4) * 0.25;
 
   const mediumSignals = [
     /explain/i,

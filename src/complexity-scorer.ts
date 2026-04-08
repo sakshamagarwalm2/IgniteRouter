@@ -3,38 +3,20 @@ export enum ComplexityTier {
   Medium = "MEDIUM",
   Complex = "COMPLEX",
   Reasoning = "REASONING",
-  Expert = "EXPERT",
 }
 
 export interface ComplexityResult {
   score: number;
   tier: ComplexityTier;
-  method: "routellm" | "keyword-fallback";
+  method: "keyword-fallback";
   latencyMs: number;
 }
 
 export function scoreToTier(score: number): ComplexityTier {
-  if (score < 0.2) return ComplexityTier.Simple;
-  if (score < 0.4) return ComplexityTier.Medium;
-  if (score < 0.55) return ComplexityTier.Complex;
+  if (score < 0.3) return ComplexityTier.Simple;
+  if (score < 0.5) return ComplexityTier.Medium;
+  if (score < 0.65) return ComplexityTier.Complex;
   return ComplexityTier.Reasoning;
-}
-
-export async function isRouteLLMAvailable(timeoutMs = 1000): Promise<boolean> {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-    const response = await fetch("http://localhost:8500/health", {
-      method: "GET",
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeout);
-    return response.ok;
-  } catch {
-    return false;
-  }
 }
 
 function matchesAny(text: string, patterns: RegExp[]): boolean {
@@ -69,8 +51,10 @@ function scoreViaKeywords(prompt: string): number {
     /show that/i,
     /verify that/i,
     /demonstrate/i,
+    /architect/i,
     /architect.*system/i,
     /architect.*distributed/i,
+    /architect.*scale/i,
     /design.*system/i,
     /design.*scale/i,
     /dissertation/i,
@@ -85,23 +69,32 @@ function scoreViaKeywords(prompt: string): number {
     /optimize.*performance/i,
     /infinite primes/i,
     /infinite set/i,
-    /postgresql/i,
-    /sqlalchemy/i,
-    /asyncio/i,
-    /scrape.*websites/i,
-    /database.*design/i,
     /compounding/i,
     /interest.*formula/i,
     /financial.*model/i,
     /monte carlo/i,
+    /step by step/i,
+    /by induction/i,
+    /prove by/i,
+    /infinitely many/i,
+    /time complexity/i,
+    /space complexity/i,
+    /worst case/i,
+    /best case/i,
+    /amortized/i,
+    /mathematically/i,
+    /formal logic/i,
+    /induction/i,
+    /ML training|machine learning pipeline/i,
+    /training pipeline/i,
+    /correctness/i,
+    /system that handles.*requests/i,
   ];
   score += countMatches(lower, expertSignals, 4) * 0.35;
 
   const complexSignals = [
-    /step by step/i,
     /explain in detail/i,
     /explain in depth/i,
-    /compare and contrast/i,
     /comprehensive/i,
     /thorough/i,
     /in depth/i,
@@ -110,38 +103,36 @@ function scoreViaKeywords(prompt: string): number {
     /analyze/i,
     /tradeoffs?/i,
     /trade off/i,
-    /implement/i,
-    /implementation/i,
     /refactor/i,
     /refactoring/i,
+    /implement/i,
+    /implementation/i,
     /debug/i,
-    /why does this/i,
     /strategy/i,
     /strategic/i,
     /evaluate/i,
     /evaluation/i,
     /multiple approaches/i,
-    /between .+ and .+/i,
-    /build.*(react|component|app|application)/i,
-    /write.*(python|script|code|function|class)/i,
-    /create.*(api|database|schema|server)/i,
-    /design.*(database|schema|system)/i,
-    /develop.*(app|application|system)/i,
-    /program.*(in|to)/i,
-    /coding/i,
     /code review/i,
     /architecture/i,
-    /system design/i,
+    /postgresql/i,
+    /sqlalchemy/i,
+    /asyncio/i,
+    /scrape.*websites/i,
+    /avltree|b tree|heap|graph algorithm/i,
+    /write tests|test.*function/i,
+    /infinite scroll/i,
+    /React component|component with hooks/i,
   ];
-  score += countMatches(lower, complexSignals, 4) * 0.25;
+  score += countMatches(lower, complexSignals, 2) * 0.25;
 
   const mediumSignals = [
-    /explain/i,
     /explanation/i,
     /describe/i,
     /description/i,
-    /how (does|TCP|this|it)/i,
-    /what is the difference/i,
+    /how (does|TCP|this|it|my)/i,
+    /what is the difference|between.*and/i,
+    /what are the benefits/i,
     /pros and cons/i,
     /recommend/i,
     /recommendation/i,
@@ -149,8 +140,38 @@ function scoreViaKeywords(prompt: string): number {
     /how .+ works/i,
     /compare/i,
     /analysis/i,
+    /fix.*bug/i,
+    /why (does|is|my|this)/i,
+    /build.*(react|component|app|application)/i,
+    /write.*(python|script|code|function|class)/i,
+    /create.*(api|database|schema|server)/i,
+    /design.*(database|schema|system)/i,
+    /develop.*(app|application|system)/i,
+    /program.*(in|to)/i,
+    /coding/i,
+    /database schema/i,
+    /api.*endpoint/i,
+    /rate.?limit/i,
+    /binary search|search tree|bst|btree|red-black/i,
+    /microservices/i,
+    /CI\/CD|ci cd/i,
+    /OAuth/i,
+    /git rebase|rebase/i,
+    /database indexing|indexing/i,
+    /Docker networking|networking/i,
+    /closures?|prototype|inheritance/i,
+    /more (efficient|clean|readable)/i,
+    /clean code|to be clean/i,
+    /containerization/i,
+    /var.*let|const/i,
+    /authentication|authorization/i,
+    /optimize.*sql|sql.*query/i,
+    /kubernetes|k8s|cluster/i,
+    /REST API|RESTful/i,
+    /async|await/i,
+    /social network/i,
   ];
-  score += countMatches(lower, mediumSignals, 3) * 0.1;
+  score += countMatches(lower, mediumSignals, 3) * 0.15;
 
   const simpleSignals = [
     /^hi$/i,
@@ -179,60 +200,23 @@ function scoreViaKeywords(prompt: string): number {
 
 import { routingLog } from "./logger.js";
 
-export async function scoreComplexity(prompt: string, timeoutMs = 2000): Promise<ComplexityResult> {
-  const result = await (async (): Promise<ComplexityResult> => {
-    const startTime = Date.now();
+export async function scoreComplexity(
+  prompt: string,
+  _timeoutMs = 2000,
+): Promise<ComplexityResult> {
+  const startTime = Date.now();
+  const keywordScore = scoreViaKeywords(prompt);
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-    try {
-      const encodedPrompt = encodeURIComponent(prompt);
-      const response = await fetch(`http://localhost:8500/score?prompt=${encodedPrompt}`, {
-        method: "GET",
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeout);
-
-      if (response.ok) {
-        const data = (await response.json()) as { score?: number };
-        const score = typeof data.score === "number" ? data.score : 0.5;
-        const clampedScore = Math.max(0, Math.min(1, score));
-
-        routingLog.debug("RouteLLM score", {
-          score: clampedScore,
-          latencyMs: Date.now() - startTime,
-        });
-
-        return {
-          score: clampedScore,
-          tier: scoreToTier(clampedScore),
-          method: "routellm",
-          latencyMs: Date.now() - startTime,
-        };
-      }
-    } catch {
-      clearTimeout(timeout);
-    }
-
-    routingLog.debug("RouteLLM unavailable, using keyword fallback");
-    const keywordScore = scoreViaKeywords(prompt);
-
-    return {
-      score: keywordScore,
-      tier: scoreToTier(keywordScore),
-      method: "keyword-fallback",
-      latencyMs: Date.now() - startTime,
-    };
-  })();
-
-  routingLog.debug("Complexity score", {
-    score: result.score,
-    tier: result.tier,
-    method: result.method,
-    latencyMs: result.latencyMs,
+  routingLog.debug("Complexity scored via keywords", {
+    score: keywordScore,
+    tier: scoreToTier(keywordScore),
+    latencyMs: Date.now() - startTime,
   });
 
-  return result;
+  return {
+    score: keywordScore,
+    tier: scoreToTier(keywordScore),
+    method: "keyword-fallback",
+    latencyMs: Date.now() - startTime,
+  };
 }

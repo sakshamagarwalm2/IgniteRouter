@@ -1,6 +1,20 @@
-import { route, RoutingContext, RoutingDecision } from "./routing-engine.js";
-import { IgniteConfig, UserProvider } from "./user-providers.js";
+/**
+ * Decide Endpoint Handler - ClawRouter-Style
+ *
+ * Uses the new routing engine that follows ClawRouter's approach:
+ * - Tier configs with primary + fallback chains
+ * - Profiles (auto, eco, premium, agentic)
+ * - Promotions support
+ */
+
+import {
+  route as routeV2,
+  type RoutingContext,
+  type RoutingDecision,
+} from "./routing-engine-v2.js";
+import { IgniteConfig } from "./openclaw-providers.js";
 import { logger } from "./logger.js";
+import { ComplexityTier } from "./complexity-scorer.js";
 
 const log = logger.child("decide");
 
@@ -10,6 +24,7 @@ export interface DecideRequest {
   model?: string;
   max_tokens?: number;
   stream?: boolean;
+  profile?: "auto" | "eco" | "premium" | "agentic";
 }
 
 export interface DecideResponse {
@@ -18,11 +33,8 @@ export interface DecideResponse {
   taskType: string;
   complexityScore: number;
   reasoning: string;
-  alternatives: Array<{
-    model: string;
-    tier: string;
-    providerName: string;
-  }>;
+  profile: string;
+  alternatives: string[];
   capabilities: {
     supportsVision: boolean;
     supportsTools: boolean;
@@ -84,6 +96,7 @@ export async function handleDecideRequest(
     messageCount: body.messages?.length ?? 0,
     hasTools: !!body.tools,
     requestedModel: body.model,
+    profile: body.profile || "auto",
   });
 
   const hasImages = detectImages(body.messages);
@@ -98,18 +111,20 @@ export async function handleDecideRequest(
     needsStreaming: body.stream ?? false,
   };
 
-  const decision = await route(context, config);
+  const profile = body.profile || "auto";
+  const decision = await routeV2(context, config, profile);
 
   const routingLatencyMs = Date.now() - startTime;
 
-  if (decision.error) {
+  if (decision.error || !decision.recommendedModel) {
     log.error("Routing error", { error: decision.error });
     return {
       recommendedModel: "",
-      tier: "UNKNOWN",
+      tier: decision.tier ?? "UNKNOWN",
       taskType: decision.taskType ?? "UNKNOWN",
       complexityScore: decision.complexityScore ?? 0,
-      reasoning: decision.error,
+      reasoning: decision.error || "No model selected",
+      profile: decision.profile,
       alternatives: [],
       capabilities: {
         supportsVision: false,
@@ -122,74 +137,57 @@ export async function handleDecideRequest(
     };
   }
 
-  const selectedProvider = decision.candidateProviders[0];
+  const recommendedModel = decision.recommendedModel;
+  const alternatives = decision.candidateModels.slice(1, 4);
 
-  if (!selectedProvider) {
-    apiLog.error("[IgniteRouter] No provider selected", {
-      tier: decision.tier,
-      candidates: decision.candidateProviders.length,
-    });
-    return {
-      recommendedModel: "",
-      tier: decision.tier ?? "UNKNOWN",
-      taskType: decision.taskType ?? "UNKNOWN",
-      complexityScore: decision.complexityScore ?? 0,
-      reasoning: "No suitable provider found",
-      alternatives: [],
-      capabilities: {
+  const provider = config.providers.find((p) => p.id === recommendedModel);
+  const capabilities = provider
+    ? {
+        supportsVision: provider.supportsVision,
+        supportsTools: provider.supportsTools,
+        supportsStreaming: provider.supportsStreaming,
+        contextWindow: provider.contextWindow,
+      }
+    : {
         supportsVision: false,
         supportsTools: false,
         supportsStreaming: false,
         contextWindow: 0,
-      },
-      routingLatencyMs,
-      error: "No suitable provider found",
-    };
-  }
-
-  const alternatives = decision.candidateProviders.slice(1, 4).map((p) => ({
-    model: p.id,
-    tier: p.tier,
-    providerName: p.providerName,
-  }));
+      };
 
   let reasoning = "";
   if (decision.override?.detected) {
-    reasoning = `Override: using ${selectedProvider.id}`;
+    reasoning = `Override: using ${recommendedModel}`;
   } else {
-    reasoning = `${decision.taskType} task, ${decision.tier} tier selected`;
+    reasoning = `${decision.taskType} task, ${decision.tier} tier selected (${profile} profile)`;
     if (hasTools) reasoning += ", tool-capable model";
     if (hasImages) reasoning += ", vision-capable model";
   }
 
   apiLog.info("[IgniteRouter] Decision made", {
-    model: selectedProvider.id,
-    provider: selectedProvider.providerName,
+    model: recommendedModel,
     tier: decision.tier,
     taskType: decision.taskType,
     complexityScore: decision.complexityScore,
+    profile: decision.profile,
     latencyMs: routingLatencyMs,
   });
 
   if (apiLog.debug) {
     apiLog.debug("[IgniteRouter] Alternative models available", {
-      alternatives: alternatives.map((a) => a.model),
+      alternatives,
     });
   }
 
   return {
-    recommendedModel: selectedProvider.id,
+    recommendedModel,
     tier: decision.tier ?? "UNKNOWN",
     taskType: decision.taskType ?? "UNKNOWN",
     complexityScore: decision.complexityScore ?? 0,
     reasoning,
+    profile: decision.profile,
     alternatives,
-    capabilities: {
-      supportsVision: selectedProvider.supportsVision,
-      supportsTools: selectedProvider.supportsTools,
-      supportsStreaming: selectedProvider.supportsStreaming,
-      contextWindow: selectedProvider.contextWindow,
-    },
+    capabilities,
     routingLatencyMs,
   };
 }

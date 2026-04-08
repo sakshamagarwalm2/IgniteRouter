@@ -18,7 +18,7 @@ const TIER_ORDER: ComplexityTier[] = [
   ComplexityTier.Simple,
   ComplexityTier.Medium,
   ComplexityTier.Complex,
-  ComplexityTier.Expert,
+  ComplexityTier.Reasoning,
 ];
 
 function getTierDistance(requested: ComplexityTier, actual: ComplexityTier): number {
@@ -135,9 +135,9 @@ export function selectCandidates(
         scoreReasons.push("slow");
       }
     } else if (priority === "quality") {
-      if (provider.tier === ComplexityTier.Expert) {
+      if (provider.tier === ComplexityTier.Reasoning) {
         score += 10;
-        scoreReasons.push("expert tier for quality");
+        scoreReasons.push("reasoning tier for quality");
       } else if (provider.tier === ComplexityTier.Complex) {
         score += 5;
         scoreReasons.push("complex tier for quality");

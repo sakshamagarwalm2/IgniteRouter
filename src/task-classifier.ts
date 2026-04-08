@@ -72,7 +72,6 @@ function findMatchingPattern(text: string, patterns: RegExp[]): string | null {
 }
 
 const REASONING_PATTERNS = [
-  /analyse|analyze|analysis|analyzing/,
   /compare|comparing|comparison/,
   /decide|decision|deciding/,
   /should i|which is better|what.*better/,
@@ -86,6 +85,8 @@ const REASONING_PATTERNS = [
   /recommend|recommendation/,
   /assess|assessments?/,
   /investigate|investigation/,
+  /figure out|work out/,
+  /determine|conclusion/,
 ];
 
 const CREATIVE_PATTERNS = [
@@ -104,6 +105,12 @@ const CREATIVE_PATTERNS = [
   /storytelling/,
 ];
 
+const VISION_PATTERNS = [
+  /image|photo|picture|diagram|chart|graph|visual/,
+  /analyse.*image|analyze.*image|look at.*image/,
+  /what.*in.*this|describe.*image|explain.*image/,
+];
+
 const DEEP_PATTERNS = [
   /prove|proof|theorem|lemma|corollary/,
   /formally|formal\s+(?:definition|specification|proof)/,
@@ -117,6 +124,11 @@ const DEEP_PATTERNS = [
   /system\s+architecture/,
   /reference\s+implementation/,
   /exhaustive|encyclopedic/,
+  /explain\s+(?:quantum|mechanics|relativity)/,
+  /how\s+does.*work|how.*works/,
+  /deep\s+explanation|fundamental.*understanding/,
+  /under the hood|internals?/,
+  /ultimate guide|complete guide/,
 ];
 
 const AGENTIC_PATTERNS = [
@@ -169,6 +181,15 @@ export function classifyTask(
       };
     }
 
+    const visionMatch = findMatchingPattern(lastUserMsg, VISION_PATTERNS);
+    if (visionMatch) {
+      return {
+        taskType: TaskType.Vision,
+        confidence: "keyword",
+        reason: `keyword: ${visionMatch}`,
+      };
+    }
+
     if (estimatedTokens !== undefined && estimatedTokens > 8000) {
       return {
         taskType: TaskType.Deep,
@@ -211,11 +232,11 @@ export function classifyTask(
     };
   })();
 
-  routingLog.debug("Task classification result", { 
-    taskType: result.taskType, 
-    confidence: result.confidence, 
-    reason: result.reason 
+  routingLog.debug("Task classification result", {
+    taskType: result.taskType,
+    confidence: result.confidence,
+    reason: result.reason,
   });
-  
+
   return result;
 }

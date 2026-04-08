@@ -8,7 +8,13 @@ export interface OverrideResult {
   notConfigured?: boolean;
 }
 
-const AUTO_ROUTING_VALUES = ["smartrouter/auto", "igniterouter/auto", "ignite/auto", "auto", "blockrun/auto"];
+const AUTO_ROUTING_VALUES = [
+  "smartrouter/auto",
+  "igniterouter/auto",
+  "ignite/auto",
+  "auto",
+  "blockrun/auto",
+];
 
 const ALIAS_MAP: Record<string, string> = {
   "gpt-4o": "openai/gpt-4o",
@@ -21,10 +27,40 @@ const ALIAS_MAP: Record<string, string> = {
   "gemini-pro": "google/gemini-2.5-pro",
   "gemini-flash": "google/gemini-2.5-flash",
   deepseek: "deepseek/deepseek-chat",
+  qwen: "ollama/qwen2.5:3b",
+  llama: "ollama/llama3.2:3b",
+  "deepseek-r1": "ollama/deepseek-r1:7b",
+  codellama: "ollama/codellama:7b",
+  minimax: "minimax/minimax-text-01",
 };
 
+const KNOWN_MODEL_PREFIXES = [
+  "gpt",
+  "claude",
+  "gemini",
+  "deepseek",
+  "llama",
+  "qwen",
+  "minimax",
+  "mistral",
+  "grok",
+  "nvidia",
+  "openai",
+  "anthropic",
+  "google",
+  "xai",
+  "codellama",
+  "ollama",
+];
+
 function isModelIdPattern(text: string): boolean {
-  return text.includes("/") || Object.prototype.hasOwnProperty.call(ALIAS_MAP, text);
+  const lowerText = text.toLowerCase();
+  if (text.includes("/")) return true;
+  if (Object.prototype.hasOwnProperty.call(ALIAS_MAP, lowerText)) return true;
+  for (const prefix of KNOWN_MODEL_PREFIXES) {
+    if (lowerText.startsWith(prefix)) return true;
+  }
+  return false;
 }
 
 function normalizeModelId(raw: string): string {
@@ -169,4 +205,3 @@ export function detectOverride(
 
   return { detected: false };
 }
-

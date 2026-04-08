@@ -285,6 +285,7 @@ export const igniterouter: OpenClawPluginDefinition = {
 export default igniterouter;
 
 export { route } from "./routing-engine.js";
+export { scoreComplexity } from "./complexity-scorer.js";
 export type { RoutingContext, RoutingDecision } from "./routing-engine.js";
 export type { IgniteConfig, IgniteProvider } from "./openclaw-providers.js";
 export { loadProvidersFromOpenClaw, createIgniteConfig } from "./openclaw-providers.js";

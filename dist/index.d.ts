@@ -144,6 +144,13 @@ declare enum ComplexityTier {
     Reasoning = "REASONING",
     Expert = "EXPERT"
 }
+interface ComplexityResult {
+    score: number;
+    tier: ComplexityTier;
+    method: "routellm" | "keyword-fallback";
+    latencyMs: number;
+}
+declare function scoreComplexity(prompt: string, timeoutMs?: number): Promise<ComplexityResult>;
 
 interface OpenClawModel {
     id: string;
@@ -266,4 +273,4 @@ declare function route(context: RoutingContext, config: IgniteConfig): Promise<R
 
 declare const igniterouter: OpenClawPluginDefinition;
 
-export { type IgniteConfig, type IgniteProvider, type RoutingContext, type RoutingDecision, createIgniteConfig, igniterouter as default, igniterouter, loadProvidersFromOpenClaw, route };
+export { type IgniteConfig, type IgniteProvider, type RoutingContext, type RoutingDecision, createIgniteConfig, igniterouter as default, igniterouter, loadProvidersFromOpenClaw, route, scoreComplexity };

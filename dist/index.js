@@ -989,7 +989,10 @@ function estimateTokens(messages) {
 async function route(context, config) {
   const timer = new RoutingTimer();
   const startTime = Date.now();
-  routingLog.debug("Routing decision started", { model: context.requestedModel, tokens: context.estimatedTokens });
+  routingLog.debug("Routing decision started", {
+    model: context.requestedModel,
+    tokens: context.estimatedTokens
+  });
   const override = detectOverride(context.messages, context.requestedModel, config.providers);
   if (override.detected) {
     if (override.notConfigured) {
@@ -1021,12 +1024,27 @@ async function route(context, config) {
   const taskResult = classifyTask(context.messages, context.tools);
   const taskType = taskResult.taskType;
   timer.mark("task");
-  routingLog.debug("Task classified", { taskType, confidence: taskResult.confidence, reason: taskResult.reason });
+  routingLog.debug("Task classified", {
+    taskType,
+    confidence: taskResult.confidence,
+    reason: taskResult.reason
+  });
   const complexityResult = await scoreComplexity(
     typeof context.messages[context.messages.length - 1]?.content === "string" ? context.messages[context.messages.length - 1].content : ""
   );
   timer.mark("complexity");
-  routingLog.debug("Complexity scored", { score: complexityResult.score, tier: complexityResult.tier, method: complexityResult.method });
+  routingLog.debug("Complexity scored", {
+    score: complexityResult.score,
+    tier: complexityResult.tier,
+    method: complexityResult.method,
+    latencyMs: complexityResult.latencyMs
+  });
+  routingLog.info("[IgniteRouter] Task analysis complete", {
+    taskType,
+    complexityScore: complexityResult.score,
+    tier: complexityResult.tier,
+    scoringMethod: complexityResult.method
+  });
   const hasImages = detectImages(context.messages);
   const hasTools = Array.isArray(context.tools) && context.tools.length > 0;
   const needsStreaming = context.needsStreaming ?? false;
@@ -1039,13 +1057,17 @@ async function route(context, config) {
     { hasImages, hasTools, needsStreaming, estimatedTokens }
   );
   timer.mark("selection");
-  routingLog.info("Candidates selected", {
+  routingLog.info("[IgniteRouter] Candidates selected", {
+    tier: complexityResult.tier,
     count: selection.candidates.length,
     filtered: selection.filtered.length,
-    top: selection.candidates[0]?.provider.id ?? "none"
+    topModel: selection.candidates[0]?.provider.id ?? "none",
+    topTier: selection.candidates[0]?.provider.tier ?? "none"
   });
   if (selection.candidates.length === 0) {
-    routingLog.warn("No candidates after filtering", { filtered: selection.filtered.map((p) => p.id) });
+    routingLog.warn("No candidates after filtering", {
+      filtered: selection.filtered.map((p) => p.id)
+    });
     const filteredReasons = Array.from(selection.filterReasons.entries()).map(([id, reason]) => `  ${id}: ${reason}`).join("\n");
     return {
       taskType,
@@ -1104,9 +1126,10 @@ function detectImages2(messages) {
   }
   return false;
 }
-async function handleDecideRequest(body, config) {
+async function handleDecideRequest(body, config, openclawLogger) {
   const startTime = Date.now();
-  log.info("Decision request received", {
+  const apiLog = openclawLogger || log;
+  apiLog.info("[IgniteRouter] Decision request received", {
     messageCount: body.messages?.length ?? 0,
     hasTools: !!body.tools,
     requestedModel: body.model
@@ -1144,7 +1167,10 @@ async function handleDecideRequest(body, config) {
   }
   const selectedProvider = decision.candidateProviders[0];
   if (!selectedProvider) {
-    log.error("No provider selected");
+    apiLog.error("[IgniteRouter] No provider selected", {
+      tier: decision.tier,
+      candidates: decision.candidateProviders.length
+    });
     return {
       recommendedModel: "",
       tier: decision.tier ?? "UNKNOWN",
@@ -1175,11 +1201,19 @@ async function handleDecideRequest(body, config) {
     if (hasTools) reasoning += ", tool-capable model";
     if (hasImages) reasoning += ", vision-capable model";
   }
-  log.info("Decision made", {
+  apiLog.info("[IgniteRouter] Decision made", {
     model: selectedProvider.id,
+    provider: selectedProvider.providerName,
     tier: decision.tier,
+    taskType: decision.taskType,
+    complexityScore: decision.complexityScore,
     latencyMs: routingLatencyMs
   });
+  if (apiLog.debug) {
+    apiLog.debug("[IgniteRouter] Alternative models available", {
+      alternatives: alternatives.map((a) => a.model)
+    });
+  }
   return {
     recommendedModel: selectedProvider.id,
     tier: decision.tier ?? "UNKNOWN",
@@ -1430,6 +1464,7 @@ export {
   index_default as default,
   igniterouter,
   loadProvidersFromOpenClaw,
-  route
+  route,
+  scoreComplexity
 };
 //# sourceMappingURL=index.js.map

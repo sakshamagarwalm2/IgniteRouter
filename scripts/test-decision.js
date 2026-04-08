@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { route } from "../dist/index.js";
+import { route, scoreComplexity } from "../dist/index.js";
 
 const providers = [
   {
@@ -66,19 +66,48 @@ const testPrompts = [
 ];
 
 async function runTests() {
-  console.log("=".repeat(110));
+  console.log("=".repeat(120));
   console.log("IgniteRouter Decision-Only Mode - Routing Test Results");
-  console.log("=".repeat(110));
+  console.log("=".repeat(120));
   console.log();
 
+  console.log("Checking RouteLLM availability...");
+  const routellmAvailable = await fetch("http://localhost:8500/health", { method: "GET" })
+    .then((r) => r.ok)
+    .catch(() => false);
+  console.log(
+    `RouteLLM: ${routellmAvailable ? "✅ RUNNING" : "❌ NOT RUNNING (using keyword fallback)"}`,
+  );
+  console.log();
+
+  // Test individual prompts with scoring method
+  console.log("Complexity Scoring Test:");
+  console.log(
+    "| Prompt                                    | Score  | Tier       | Method        |",
+  );
+  console.log("|------------------------------------------|--------|------------|---------------|");
+
+  for (const { prompt, expected } of testPrompts) {
+    const scoreResult = await scoreComplexity(prompt);
+    console.log(
+      `| ${prompt.substring(0, 40).padEnd(40)} | ${String(scoreResult.score).padEnd(5)} | ${scoreResult.tier.padEnd(10)} | ${scoreResult.method.padEnd(13)} |`,
+    );
+  }
+
+  console.log();
+  console.log("=".repeat(120));
+  console.log("Routing Decision Test:");
+  console.log("=".repeat(120));
+
   const header =
-    "| #  | Prompt                                    | Expected  | Tier       | Recommended Model                |";
+    "| #  | Prompt                                    | Expected  | Tier       | Method        | Recommended Model                |";
   console.log(header);
   console.log(
-    "|---|------------------------------------------|-----------|------------|-----------------------------------|",
+    "|---|------------------------------------------|-----------|------------|---------------|-----------------------------------|",
   );
 
   let correct = 0;
+  let methodsUsed = { routellm: 0, "keyword-fallback": 0 };
 
   for (let i = 0; i < testPrompts.length; i++) {
     const { prompt, expected } = testPrompts[i];
@@ -97,22 +126,36 @@ async function runTests() {
     const latency = Date.now() - start;
     const model = result.candidateProviders[0]?.id || "NONE";
     const tier = result.tier || "UNKNOWN";
+    const method = result.complexityScore
+      ? result.complexityScore > 0.9
+        ? "routellm"
+        : "keyword"
+      : "N/A";
+
+    // Track method
+    const scoreResult = await scoreComplexity(prompt);
+    methodsUsed[scoreResult.method] = (methodsUsed[scoreResult.method] || 0) + 1;
 
     const isCorrect = tier === expected;
     if (isCorrect) correct++;
     const status = isCorrect ? "✅" : "⚠️";
 
     console.log(
-      `| ${String(i + 1).padEnd(2)} | ${prompt.substring(0, 40).padEnd(40)} | ${expected.padEnd(9)} | ${tier.padEnd(10)} | ${model.padEnd(33)} |`,
+      `| ${String(i + 1).padEnd(2)} | ${prompt.substring(0, 40).padEnd(40)} | ${expected.padEnd(9)} | ${tier.padEnd(10)} | ${String(scoreResult.method).padEnd(13)} | ${model.padEnd(33)} |`,
     );
   }
 
   console.log();
-  console.log("=".repeat(110));
+  console.log("=".repeat(120));
   console.log(
     `Results: ${correct}/${testPrompts.length} correct (${Math.round((correct / testPrompts.length) * 100)}%)`,
   );
-  console.log("=".repeat(110));
+  console.log(
+    `Method usage: ${Object.entries(methodsUsed)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join(", ")}`,
+  );
+  console.log("=".repeat(120));
 }
 
 runTests().catch(console.error);

@@ -70,10 +70,17 @@ function detectImages(messages: Array<{ role: string; content: unknown }>): bool
 export async function handleDecideRequest(
   body: DecideRequest,
   config: IgniteConfig,
+  openclawLogger?: {
+    info: (msg: string, ctx?: Record<string, unknown>) => void;
+    error: (msg: string, ctx?: Record<string, unknown>) => void;
+    debug?: (msg: string, ctx?: Record<string, unknown>) => void;
+  },
 ): Promise<DecideResponse> {
   const startTime = Date.now();
 
-  log.info("Decision request received", {
+  const apiLog = openclawLogger || log;
+
+  apiLog.info("[IgniteRouter] Decision request received", {
     messageCount: body.messages?.length ?? 0,
     hasTools: !!body.tools,
     requestedModel: body.model,
@@ -118,7 +125,10 @@ export async function handleDecideRequest(
   const selectedProvider = decision.candidateProviders[0];
 
   if (!selectedProvider) {
-    log.error("No provider selected");
+    apiLog.error("[IgniteRouter] No provider selected", {
+      tier: decision.tier,
+      candidates: decision.candidateProviders.length,
+    });
     return {
       recommendedModel: "",
       tier: decision.tier ?? "UNKNOWN",
@@ -152,11 +162,20 @@ export async function handleDecideRequest(
     if (hasImages) reasoning += ", vision-capable model";
   }
 
-  log.info("Decision made", {
+  apiLog.info("[IgniteRouter] Decision made", {
     model: selectedProvider.id,
+    provider: selectedProvider.providerName,
     tier: decision.tier,
+    taskType: decision.taskType,
+    complexityScore: decision.complexityScore,
     latencyMs: routingLatencyMs,
   });
+
+  if (apiLog.debug) {
+    apiLog.debug("[IgniteRouter] Alternative models available", {
+      alternatives: alternatives.map((a) => a.model),
+    });
+  }
 
   return {
     recommendedModel: selectedProvider.id,

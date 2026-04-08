@@ -67,7 +67,10 @@ export async function route(
 ): Promise<RoutingDecision> {
   const timer = new RoutingTimer();
   const startTime = Date.now();
-  routingLog.debug("Routing decision started", { model: context.requestedModel, tokens: context.estimatedTokens });
+  routingLog.debug("Routing decision started", {
+    model: context.requestedModel,
+    tokens: context.estimatedTokens,
+  });
 
   const override = detectOverride(context.messages, context.requestedModel, config.providers);
 
@@ -106,7 +109,11 @@ export async function route(
   const taskResult = classifyTask(context.messages, context.tools);
   const taskType = taskResult.taskType;
   timer.mark("task");
-  routingLog.debug("Task classified", { taskType, confidence: taskResult.confidence, reason: taskResult.reason });
+  routingLog.debug("Task classified", {
+    taskType,
+    confidence: taskResult.confidence,
+    reason: taskResult.reason,
+  });
 
   const complexityResult = await scoreComplexity(
     typeof context.messages[context.messages.length - 1]?.content === "string"
@@ -114,7 +121,20 @@ export async function route(
       : "",
   );
   timer.mark("complexity");
-  routingLog.debug("Complexity scored", { score: complexityResult.score, tier: complexityResult.tier, method: complexityResult.method });
+  routingLog.debug("Complexity scored", {
+    score: complexityResult.score,
+    tier: complexityResult.tier,
+    method: complexityResult.method,
+    latencyMs: complexityResult.latencyMs,
+  });
+
+  // Log for OpenClaw
+  routingLog.info("[IgniteRouter] Task analysis complete", {
+    taskType,
+    complexityScore: complexityResult.score,
+    tier: complexityResult.tier,
+    scoringMethod: complexityResult.method,
+  });
 
   const hasImages = detectImages(context.messages);
   const hasTools = Array.isArray(context.tools) && context.tools.length > 0;
@@ -130,14 +150,18 @@ export async function route(
   );
   timer.mark("selection");
 
-  routingLog.info("Candidates selected", { 
-    count: selection.candidates.length, 
+  routingLog.info("[IgniteRouter] Candidates selected", {
+    tier: complexityResult.tier,
+    count: selection.candidates.length,
     filtered: selection.filtered.length,
-    top: selection.candidates[0]?.provider.id ?? "none"
+    topModel: selection.candidates[0]?.provider.id ?? "none",
+    topTier: selection.candidates[0]?.provider.tier ?? "none",
   });
 
   if (selection.candidates.length === 0) {
-    routingLog.warn("No candidates after filtering", { filtered: selection.filtered.map(p => p.id) });
+    routingLog.warn("No candidates after filtering", {
+      filtered: selection.filtered.map((p) => p.id),
+    });
     const filteredReasons = Array.from(selection.filterReasons.entries())
       .map(([id, reason]) => `  ${id}: ${reason}`)
       .join("\n");

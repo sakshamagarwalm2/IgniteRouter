@@ -1,8 +1,9 @@
 <div align="center">
 
-<img src="assets/banner.png" alt="ClawRouter Banner" width="600">
+<img src="assets/banner.png" alt="IgniteRouter Banner" width="600">
 
-<h1>The LLM router built for autonomous agents</h1>
+<h1>IgniteRouter</h1>
+<p><i>A fork of <a href="https://github.com/BlockRunAI/ClawRouter">ClawRouter</a> - The LLM router built for autonomous agents</i></p>
 
 <p>Agents can't sign up for accounts. Agents can't enter credit cards.<br>
 Agents can only sign transactions.<br><br>
@@ -32,7 +33,7 @@ Agents can only sign transactions.<br><br>
 
 </div>
 
-> **ClawRouter** is an open-source smart LLM router that reduces AI API costs by up to 92%. It analyzes each request across 15 dimensions and routes to the cheapest capable model in under 1ms, entirely locally. ClawRouter is the only LLM router built for autonomous AI agents — it uses wallet signatures for authentication (no API keys) and USDC micropayments via the x402 protocol (no credit cards). 55+ models from OpenAI, Anthropic, Google, xAI, DeepSeek, and more. MIT licensed.
+> **IgniteRouter** is a fork of **ClawRouter** - an open-source smart LLM router that reduces AI API costs by up to 92%. See [IGNITEROUTER.md](IGNITEROUTER.md) for upstream sync instructions.
 
 ---
 

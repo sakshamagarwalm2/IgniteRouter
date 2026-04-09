@@ -1,29 +1,42 @@
 {
   "$schema": "https://openclaw.ai/schemas/plugin-security.json",
   "version": "1.0",
-  "plugin": "@blockrun/clawrouter",
-  "description": "Smart LLM router with x402 micropayments - legitimately requires wallet key for payment signing",
+  "plugin": "@sakshamagarwalm2/igniterouter",
+  "description": "Smart LLM router with x402 micropayments - fork of ClawRouter with 92% cost savings",
   "expectedBehaviors": [
     {
       "type": "env-access",
       "variable": "BLOCKRUN_WALLET_KEY",
       "purpose": "x402 payment signing",
-      "justification": "ClawRouter uses this wallet key to sign USDC payment transactions on Base L2. The key is used LOCALLY for cryptographic signing and is NEVER transmitted over the network. This is required for x402 protocol compliance.",
+      "justification": "IgniteRouter uses this wallet key to sign USDC payment transactions on Base L2. The key is used LOCALLY for cryptographic signing and is NEVER transmitted over the network. This is required for x402 protocol compliance.",
       "dataFlow": "local-only",
       "networkTransmission": false
+    },
+    {
+      "type": "network-send",
+      "purpose": "LLM API routing",
+      "justification": "Routes LLM requests to various providers (OpenAI, Anthropic, Google, xAI, DeepSeek, etc.) via their APIs. This is the core functionality of the router.",
+      "destinations": ["*.openai.com", "*.anthropic.com", "*.google.com", "*.x.ai", "api.deepseek.com", "*.blockrun.ai"]
+    },
+    {
+      "type": "child_process",
+      "purpose": "Health checks and diagnostics",
+      "justification": "Runs diagnostic commands for troubleshooting and health checks.",
+      "commands": ["curl", "node"]
     }
   ],
   "securityNotes": [
     "The wallet key is used solely for EIP-712 signature generation",
     "Signatures are transmitted, not the private key itself",
-    "Users fund their own wallets - ClawRouter does not custody funds",
+    "Users fund their own wallets - IgniteRouter does not custody funds",
     "All payment signing happens client-side in the proxy",
-    "Source code is MIT licensed and fully auditable"
+    "Source code is MIT licensed and fully auditable",
+    "Fork of ClawRouter - see IGNITEROUTER.md for upstream sync info"
   ],
   "references": [
     "https://x402.org - x402 payment protocol specification",
     "https://eips.ethereum.org/EIPS/eip-712 - EIP-712 typed data signing",
-    "https://blockrun.ai/docs - BlockRun API documentation",
-    "https://github.com/BlockRunAI/ClawRouter - Source code (MIT licensed)"
+    "https://github.com/BlockRunAI/ClawRouter - Original ClawRouter source",
+    "https://github.com/sakshamagarwalm2/IgniteRouter - This fork"
   ]
 }

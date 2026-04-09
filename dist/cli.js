@@ -73558,11 +73558,11 @@ var DEFAULT_ROUTING_CONFIG = {
   // Time-windowed promotions — auto-applied when active, ignored when expired
   promotions: [
     {
-      name: "GLM-5 Launch Promo ($0.001 flat)",
+      name: "GLM-5.1 Launch Promo ($0.001 flat)",
       startDate: "2026-04-01",
       endDate: "2026-04-15",
       tierOverrides: {
-        SIMPLE: { primary: "zai/glm-5" }
+        SIMPLE: { primary: "zai/glm-5.1" }
       },
       profiles: ["auto"]
       // only auto profile — eco stays free, premium stays premium
@@ -73689,8 +73689,9 @@ var MODEL_ALIASES = {
   "minimax-m2.7": "minimax/minimax-m2.7",
   "minimax-m2.5": "minimax/minimax-m2.5",
   // Z.AI GLM-5
-  glm: "zai/glm-5",
+  glm: "zai/glm-5.1",
   "glm-5": "zai/glm-5",
+  "glm-5.1": "zai/glm-5.1",
   "glm-5-turbo": "zai/glm-5-turbo",
   // Routing profile aliases (common variations)
   "auto-router": "auto",
@@ -74386,6 +74387,17 @@ var BLOCKRUN_MODELS = [
   },
   // Z.AI GLM-5 Models
   {
+    id: "zai/glm-5.1",
+    name: "GLM-5.1",
+    version: "5.1",
+    inputPrice: 1.4,
+    outputPrice: 4.4,
+    contextWindow: 2e5,
+    maxOutput: 128e3,
+    toolCalling: true,
+    promo: { flatPrice: 1e-3, startDate: "2026-04-01", endDate: "2026-04-15" }
+  },
+  {
     id: "zai/glm-5",
     name: "GLM-5",
     version: "5",
@@ -74404,7 +74416,8 @@ var BLOCKRUN_MODELS = [
     outputPrice: 4,
     contextWindow: 2e5,
     maxOutput: 128e3,
-    toolCalling: true
+    toolCalling: true,
+    promo: { flatPrice: 1e-3, startDate: "2026-04-01", endDate: "2026-04-15" }
   }
 ];
 function getActivePromoPrice(model, now = /* @__PURE__ */ new Date()) {

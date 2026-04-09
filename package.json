@@ -1,12 +1,12 @@
 {
-  "name": "@blockrun/clawrouter",
+  "name": "@sakshamagarwalm2/igniterouter",
   "version": "0.12.137",
-  "description": "Smart LLM router — save 85% on inference costs. 55+ models (11 free), one wallet, x402 micropayments.",
+  "description": "IgniteRouter - Fork of ClawRouter. Smart LLM router — save 85% on inference costs. 55+ models (11 free), one wallet, x402 micropayments.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "clawrouter": "./dist/cli.js"
+    "igniterouter": "./dist/cli.js"
   },
   "openclaw": {
     "extensions": [
@@ -53,7 +53,7 @@
     "smart-routing",
     "ai",
     "openclaw",
-    "blockrun",
+    "igniterouter",
     "x402",
     "usdc",
     "cost-optimization",
@@ -61,14 +61,13 @@
     "anthropic",
     "gemini",
     "deepseek",
-    "usdc-hackathon-winner",
-    "agentic-commerce"
+    "agentic"
   ],
-  "author": "BlockRun <hello@blockrun.ai>",
+  "author": "Saksham Agarwal <sakshamagarwalm2@gmail.com>",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/BlockRunAI/ClawRouter.git"
+    "url": "git+https://github.com/sakshamagarwalm2/IgniteRouter.git"
   },
   "dependencies": {
     "@scure/bip32": "^2.0.1",

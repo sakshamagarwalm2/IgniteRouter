@@ -57746,8 +57746,9 @@ var MODEL_ALIASES = {
   "minimax-m2.7": "minimax/minimax-m2.7",
   "minimax-m2.5": "minimax/minimax-m2.5",
   // Z.AI GLM-5
-  glm: "zai/glm-5",
+  glm: "zai/glm-5.1",
   "glm-5": "zai/glm-5",
+  "glm-5.1": "zai/glm-5.1",
   "glm-5-turbo": "zai/glm-5-turbo",
   // Routing profile aliases (common variations)
   "auto-router": "auto",
@@ -58443,6 +58444,17 @@ var BLOCKRUN_MODELS = [
   },
   // Z.AI GLM-5 Models
   {
+    id: "zai/glm-5.1",
+    name: "GLM-5.1",
+    version: "5.1",
+    inputPrice: 1.4,
+    outputPrice: 4.4,
+    contextWindow: 2e5,
+    maxOutput: 128e3,
+    toolCalling: true,
+    promo: { flatPrice: 1e-3, startDate: "2026-04-01", endDate: "2026-04-15" }
+  },
+  {
     id: "zai/glm-5",
     name: "GLM-5",
     version: "5",
@@ -58461,7 +58473,8 @@ var BLOCKRUN_MODELS = [
     outputPrice: 4,
     contextWindow: 2e5,
     maxOutput: 128e3,
-    toolCalling: true
+    toolCalling: true,
+    promo: { flatPrice: 1e-3, startDate: "2026-04-01", endDate: "2026-04-15" }
   }
 ];
 function getActivePromoPrice(model, now = /* @__PURE__ */ new Date()) {
@@ -74071,11 +74084,11 @@ var DEFAULT_ROUTING_CONFIG = {
   // Time-windowed promotions — auto-applied when active, ignored when expired
   promotions: [
     {
-      name: "GLM-5 Launch Promo ($0.001 flat)",
+      name: "GLM-5.1 Launch Promo ($0.001 flat)",
       startDate: "2026-04-01",
       endDate: "2026-04-15",
       tierOverrides: {
-        SIMPLE: { primary: "zai/glm-5" }
+        SIMPLE: { primary: "zai/glm-5.1" }
       },
       profiles: ["auto"]
       // only auto profile — eco stays free, premium stays premium
@@ -81129,53 +81142,53 @@ Run \`openclaw plugins install @blockrun/clawrouter\` to generate a wallet.`,
           };
         }
       }
-      let evmBalanceText;
-      try {
-        const monitor = new BalanceMonitor(address2);
-        const balance = await monitor.checkBalance();
-        evmBalanceText = `Balance: ${balance.balanceUSD}`;
-      } catch {
-        evmBalanceText = "Balance: (could not check)";
-      }
-      let solanaSection = "";
-      try {
-        if (existsSync3(MNEMONIC_FILE)) {
+      const evmBalancePromise = (async () => {
+        try {
+          const monitor = new BalanceMonitor(address2);
+          const balance = await monitor.checkBalance();
+          return `Balance: ${balance.balanceUSD}`;
+        } catch {
+          return "Balance: (could not check)";
+        }
+      })();
+      const solanaPromise = (async () => {
+        try {
+          if (!existsSync3(MNEMONIC_FILE)) return "";
           const { deriveSolanaKeyBytes: deriveSolanaKeyBytes2 } = await Promise.resolve().then(() => (init_wallet(), wallet_exports));
           const mnemonic = readTextFileSync(MNEMONIC_FILE).trim();
-          if (mnemonic) {
-            const solKeyBytes = deriveSolanaKeyBytes2(mnemonic);
-            const { createKeyPairSignerFromPrivateKeyBytes: createKeyPairSignerFromPrivateKeyBytes2 } = await Promise.resolve().then(() => (init_index_node37(), index_node_exports));
-            const signer = await createKeyPairSignerFromPrivateKeyBytes2(solKeyBytes);
-            const solAddr = signer.address;
-            let solBalanceText = "Balance: (checking...)";
-            try {
-              const { SolanaBalanceMonitor: SolanaBalanceMonitor2 } = await Promise.resolve().then(() => (init_solana_balance(), solana_balance_exports));
-              const solMonitor = new SolanaBalanceMonitor2(solAddr);
-              const solBalance = await solMonitor.checkBalance();
-              solBalanceText = `Balance: ${solBalance.balanceUSD}`;
-            } catch {
-              solBalanceText = "Balance: (could not check)";
-            }
-            solanaSection = [
-              "",
-              "**Solana:**",
-              `  Address: \`${solAddr}\``,
-              `  ${solBalanceText}`,
-              `  Fund (USDC only): https://solscan.io/account/${solAddr}`
-            ].join("\n");
+          if (!mnemonic) return "";
+          const solKeyBytes = deriveSolanaKeyBytes2(mnemonic);
+          const { createKeyPairSignerFromPrivateKeyBytes: createKeyPairSignerFromPrivateKeyBytes2 } = await Promise.resolve().then(() => (init_index_node37(), index_node_exports));
+          const signer = await createKeyPairSignerFromPrivateKeyBytes2(solKeyBytes);
+          const solAddr = signer.address;
+          let solBalanceText = "Balance: (could not check)";
+          try {
+            const { SolanaBalanceMonitor: SolanaBalanceMonitor2 } = await Promise.resolve().then(() => (init_solana_balance(), solana_balance_exports));
+            const solMonitor = new SolanaBalanceMonitor2(solAddr);
+            const solBalance = await solMonitor.checkBalance();
+            solBalanceText = `Balance: ${solBalance.balanceUSD}`;
+          } catch {
           }
+          return [
+            "",
+            "**Solana:**",
+            `  Address: \`${solAddr}\``,
+            `  ${solBalanceText}`,
+            `  Fund (USDC only): https://solscan.io/account/${solAddr}`
+          ].join("\n");
+        } catch {
+          return "";
         }
-      } catch {
-      }
-      const currentChain = await resolvePaymentChain();
-      let usageSection = "";
-      try {
-        const stats = await getStats(7);
-        if (stats.totalRequests > 0) {
+      })();
+      const chainPromise = resolvePaymentChain();
+      const usagePromise = (async () => {
+        try {
+          const stats = await getStats(7);
+          if (stats.totalRequests === 0) return "";
           const modelLines = Object.entries(stats.byModel).sort((a, b) => b[1].count - a[1].count).slice(0, 8).map(
             ([model, data]) => `  ${model.length > 30 ? model.slice(0, 27) + "..." : model}  ${data.count} reqs  $${data.cost.toFixed(4)}`
           );
-          usageSection = [
+          return [
             "",
             `**Usage (${stats.period}):**`,
             `  Total: ${stats.totalRequests} requests, $${stats.totalCost.toFixed(4)} spent`,
@@ -81184,9 +81197,16 @@ Run \`openclaw plugins install @blockrun/clawrouter\` to generate a wallet.`,
             "**Top Models:**",
             ...modelLines
           ].filter(Boolean).join("\n");
+        } catch {
+          return "";
         }
-      } catch {
-      }
+      })();
+      const [evmBalanceText, solanaSection, currentChain, usageSection] = await Promise.all([
+        evmBalancePromise,
+        solanaPromise,
+        chainPromise,
+        usagePromise
+      ]);
       return {
         text: [
           "**ClawRouter Wallet**",
@@ -81227,13 +81247,11 @@ var plugin = {
     }
     installSkillsToWorkspace(api.logger);
     const proc = process;
-    const alreadyRegistered = !!proc.__clawrouterRegistered;
-    proc.__clawrouterRegistered = true;
+    const proxyAlreadyStarted = !!proc.__clawrouterProxyStarted;
     if (isCompletionMode()) {
-      if (!alreadyRegistered) api.registerProvider(blockrunProvider);
+      api.registerProvider(blockrunProvider);
       return;
     }
-    if (alreadyRegistered) return;
     api.registerProvider(blockrunProvider);
     api.registerImageGenerationProvider(buildImageGenerationProvider());
     api.registerMusicGenerationProvider(buildMusicGenerationProvider());
@@ -81347,6 +81365,11 @@ var plugin = {
       api.logger.info("Not in gateway mode \u2014 proxy will start when gateway runs");
       return;
     }
+    if (proxyAlreadyStarted) {
+      api.logger.info("Proxy already started by earlier register() call \u2014 skipping");
+      return;
+    }
+    proc.__clawrouterProxyStarted = true;
     const proxyPort = getProxyPort();
     const portProbe = import("net").then(
       (net) => new Promise((resolve) => {
